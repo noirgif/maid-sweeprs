@@ -42,7 +42,7 @@ impl ThreadMotorContext {
         let patterns = if let Some(path) = config_file {
             patterns::load_patterns(path)
         } else {
-            patterns::load_patterns("~/.config/maid/patterns.yaml")
+            patterns::load_patterns("~/.config/maid-sweeprs/patterns.yaml")
         };
 
         Ok(ThreadMotorContext {

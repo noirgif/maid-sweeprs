@@ -25,13 +25,14 @@ Like Toki, she has two modes:
 
 ## Installation
 
-You can run `cargo install`.
+1. Run `cargo install maid-sweeprs`.
 
 ## Usage
 
-1. Start a MongoDB instance.
-2. Call `maid tag D:\Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
-3. Call `maid sweep -t video game -x del \q \f {}`, and the maid is going to remove all 'video' or 'game' tagged files and directories.
+1. Copy `patterns.yaml` to `~/.maid-sweepers/patterns.yaml`.
+2. Start a MongoDB instance.
+3. Call `maid tag D:\Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
+4. Call `maid sweep -t video game -x del \q \f {}`, and the maid is going to remove all 'video' or 'game' tagged files and directories.
     * Any other commands is OK as well
 
 ## Ideas
