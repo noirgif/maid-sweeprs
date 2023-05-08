@@ -1,0 +1,219 @@
+extensions:
+  audio:
+  - mp3
+  - wav
+  - ogg
+  - flac
+  - aac
+  - m4a
+  - wma
+  book:
+  - epub
+  - mobi
+  - azw
+  - azw3
+  - djvu
+  compressed:
+  - zip
+  - rar
+  - tar
+  - gz
+  - bz2
+  - 7z
+  - xz
+  - iso
+  database:
+  - sql
+  - db
+  - sqlite
+  - sqlite3
+  - mdb
+  - accdb
+  executable:
+  - exe
+  - bat
+  - sh
+  - app
+  - msi
+  - apk
+  - jar
+  font:
+  - ttf
+  - otf
+  - woff
+  - woff2
+  - eot
+  - fon
+  image:
+  - jpg
+  - jpeg
+  - png
+  - gif
+  - bmp
+  - tiff
+  - svg
+  - webp
+  - ico
+  - heic
+  presentation:
+  - ppt
+  - pptx
+  - odp
+  source-code:
+  - py
+  - js
+  - html
+  - css
+  - php
+  - java
+  - cpp
+  - c
+  - cs
+  - go
+  - rb
+  - xml
+  - json
+  - yml
+  - yaml
+  spreadsheet:
+  - xls
+  - xlsx
+  - ods
+  - csv
+  text:
+  - txt
+  - md
+  - rtf
+  - tex
+  - doc
+  - docx
+  - odt
+  - pdf
+  video:
+  - mp4
+  - mkv
+  - avi
+  - mov
+  - wmv
+  - flv
+  - webm
+  - m4v
+  - mpg
+  - mpeg
+
+filenames:
+- !!python/tuple
+  - - paper
+  - ^\d{4}\.\d{4,5}\.pdf$
+- !!python/tuple
+  - - game
+    - dmm
+  - ^[a-z]{4,5}_\d{4,5}\.exe$
+- !!python/tuple
+  - - media
+    - DLsite
+  - ^(RJ|VJ)\d{6,8}\.zip$
+- !!python/tuple
+  - - book
+    - DLsite
+  - ^BJ\d{6,8}\.zip$
+
+synonyms:
+  archive:
+  - compressed
+  - database
+  code:
+  - source-code
+  - code-project
+  document:
+  - text
+  - spreadsheet
+  - presentation
+  - pdf
+  - book
+  media:
+  - image
+  - audio
+  - video
+  - game
+
+typical_files:
+  album:
+  - ^.*\.cue$
+  code-project:
+  - ^\.git$
+  - ^\.hg$
+  - ^\.svn$
+  - ^\.bzr$
+  - ^\.gitignore$
+  - ^\.gitattributes$
+  - ^\.hgignore$
+  - ^\.npmignore$
+  - ^\.dockerignore$
+  - ^package\.json$
+  - ^yarn\.lock$
+  - ^Gemfile$
+  - ^Gemfile\.lock$
+  - ^Pipfile$
+  - ^Pipfile\.lock$
+  - ^requirements\.txt$
+  - ^go\.mod$
+  - ^go\.sum$
+  - ^Cargo\.toml$
+  - ^Cargo\.lock$
+  - ^composer\.json$
+  - ^composer\.lock$
+  - ^.*csproj$
+  - ^.*fsproj$
+  - ^.*vbproj$
+  - ^gradlew$
+  - ^gradlew\.bat$
+  - ^build\.gradle$
+  - ^pom\.xml$
+  - ^Makefile$
+  - ^CMakeLists\.txt$
+  - ^up\.py$
+  - ^Rakefile$
+  - ^Gruntfile\.js$
+  - ^gulpfile\.js$
+  - ^webpack\.config\.js$
+  - ^rollup\.config\.js$
+  - ^\.travis\.yml$
+  - ^\.circleci$
+  - ^\.github$
+  - ^Dockerfile$
+  - ^Vagrantfile$
+  - ^\.env$
+  - ^\.editorconfig$
+  - ^\.prettierrc$
+  - ^\.eslintrc$
+  - ^tsconfig\.json$
+  - ^\.vscode$
+  - ^.*\.tex$
+  - README(\.md)?$
+  - ^LICENSE$
+  game:
+  - ^Game.exe$
+  - ^.*\.xp3$
+  - ^Game.rgss3a$
+  - ^BGI.exe$
+  - ^.*\.arc$
+  - ^save$
+  - ^savedata$
+  - ^.*\.dat$
+  - ^.*\.sav$
+  - ^.*\.rpgsave$
+  - ^.*\.mpk$
+  - ^.*\.pak$
+  - ^Ron2.exe$
+  - ^.*\.rpyc$
+  - ^renpy$
+  - ^tyrano$
+  - ^UnityPlayer.dll$
+  - ^BGM$
+  - ^root\.pfs
+  - ^.*_Data$
+  - ^README\.txt$
+  software:
+  - ^.*\.dll$
+  - ^Unins\w*\.exe$
