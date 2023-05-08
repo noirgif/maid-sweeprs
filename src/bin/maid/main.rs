@@ -1,4 +1,10 @@
+mod context;
+mod data;
+mod dispatcher;
+mod patterns;
+
 use clap::{arg, command, Parser, Subcommand};
+use context::PatternsContext;
 use futures::StreamExt;
 use mongodb::bson::doc;
 use std::error::Error;
@@ -7,8 +13,7 @@ use std::path::PathBuf;
 use std::vec;
 
 use crate::context::{AsyncIOContext, MongoDBContext, ThreadMotorContext};
-use crate::dispatcher::{self, Directory, Dispatcher, Exec};
-use crate::{data, patterns};
+use crate::dispatcher::{Directory, Dispatcher, Exec};
 
 pub struct MaidSweeper {
     context: ThreadMotorContext,
@@ -25,7 +30,7 @@ struct Args {
     max_workers: usize,
     #[arg(
         long,
-        default_value = "maid-sweep",
+        default_value = "maid-sweeper",
         help = "The name of the database to use."
     )]
     database_name: String,
@@ -49,6 +54,9 @@ enum SubCommand {
         /// The paths to scan and label.
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
+        /// The path to the patterns configuration file.
+        #[arg(short = 'c', long = "config")]
+        config_file: Option<String>,
     },
     /// sweep the files with the specified tags
     Sweep {
@@ -63,42 +71,49 @@ enum SubCommand {
 
 impl MaidSweeper {
     async fn run(args: Args) -> Result<(), Box<dyn Error>> {
-        let maid = Self {
-            context: ThreadMotorContext::new(
-                &args.database_name,
-                &args.mongodb_host,
-                args.debug,
-            )
-            .await?,
-        };
-
         match args.subcommand {
-            SubCommand::Tag { paths } => {
-                let ref this = maid;
+            SubCommand::Tag { paths, config_file } => {
+                let maid = Self {
+                    context: ThreadMotorContext::new(
+                        &args.database_name,
+                        &args.mongodb_host,
+                        args.debug,
+                        config_file,
+                    )
+                    .await?,
+                };
                 let mut tasks = Vec::new();
 
                 for path in paths.iter() {
-                    if this.context.is_debug() {
+                    if maid.context.is_debug() {
                         println!("Tagging {:?}", path);
                     }
-                    tasks.push(Directory.dispatch(&this.context, path.to_owned()));
+                    tasks.push(Directory.dispatch(&maid.context, path.to_owned()));
                 }
 
                 futures::future::join_all(tasks).await;
             }
             SubCommand::Sweep { tags, exec_args } => {
-                let ref this = maid;
-                // This implementation is not provided since it depends on your specific requirements for handling sweep operations.
+                let maid = Self {
+                    context: ThreadMotorContext::new::<PathBuf>(
+                        &args.database_name,
+                        &args.mongodb_host,
+                        args.debug,
+                        None,
+                    )
+                    .await?,
+                };
+
                 let mut new_args = vec![];
                 for keyword in tags.iter() {
-                    if let Some(synonyms) = patterns::SYNONYMS.get(keyword) {
+                    if let Some(synonyms) = maid.context.get_patterns().synonyms.get(keyword) {
                         new_args.extend(synonyms);
                     } else {
                         new_args.push(keyword);
                     }
                 }
 
-                let mut cursor = this
+                let mut cursor = maid
                     .context
                     .get_db()
                     .collection::<data::Item>(dispatcher::COLLECTION_NAME)
@@ -111,7 +126,7 @@ impl MaidSweeper {
                     match item {
                         Ok(item) => {
                             match exec
-                                .dispatch(&this.context, PathBuf::from(&item.path.clone()))
+                                .dispatch(&maid.context, PathBuf::from(&item.path.clone()))
                                 .await
                             {
                                 Ok(_) => (),

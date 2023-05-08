@@ -108,11 +108,11 @@ filenames:
 - !!python/tuple
   - - game
     - dmm
-  - ^[a-z]{4,5}_\d{4,5}\.exe$
+  - ^[a-z]{2,7}_\d{4}(\.zip|\.part\d+\.(exe|rar))?$
 - !!python/tuple
   - - media
     - DLsite
-  - ^(RJ|VJ)\d{6,8}\.zip$
+  - ^(RJ|VJ)\d{6,8}(\.zip|\.part\d+\.(exe|rar))?$
 - !!python/tuple
   - - book
     - DLsite

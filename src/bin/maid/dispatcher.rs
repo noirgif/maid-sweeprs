@@ -1,6 +1,6 @@
 use crate::context::MaidContext;
 use crate::data;
-use crate::patterns;
+
 use async_trait::async_trait;
 use std::ffi::OsStr;
 use std::ffi::OsString;
@@ -112,14 +112,14 @@ impl<'a, 'b> Dispatcher<'a, 'b, PathBuf> for File {
 
         // Extension-based tagging
         let mut tags = vec![];
-        for (file_type, extensions) in patterns::EXTENSIONS.iter() {
+        for (file_type, extensions) in context.get_patterns().extensions.iter() {
             if extensions.contains(&extension) {
                 tags.push(file_type.clone());
             }
         }
 
         // Special cases
-        for (file_tags, filename_pattern) in patterns::FILENAMES_RE.iter() {
+        for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter() {
             if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
                 tags.append(&mut file_tags.clone());
             }
@@ -155,7 +155,7 @@ impl<'a, 'b> Dispatcher<'a, 'b, PathBuf> for Directory {
         while let Some(entry) = entries.next_entry().await.unwrap() {
             let path = entry.path();
             // if it is a file typical of a directory, stop here
-            for (file_tags, filename_patterns) in patterns::TYPICAL_FILES_RE.iter() {
+            for (file_tags, filename_patterns) in context.get_patterns().typical_files_re.iter() {
                 let file_name = path.file_name().unwrap().to_str().unwrap();
                 for filename_pattern in filename_patterns {
                     if filename_pattern.is_match(file_name) {
@@ -169,6 +169,14 @@ impl<'a, 'b> Dispatcher<'a, 'b, PathBuf> for Directory {
                         .await?;
                         return Ok(());
                     }
+                }
+            }
+
+            // handle special names, and skip tagging
+            for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter() {
+                if filename_pattern.is_match(&path.file_name().unwrap().to_str().unwrap()) {
+                    Tag.dispatch(context, (path, file_tags.clone())).await?;
+                    return Ok(());
                 }
             }
 

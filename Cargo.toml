@@ -1,9 +1,13 @@
 [package]
-name = "maid-sweepers"
+name = "maid-sweeprs"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+authors = ["noirgif <nomaru@outlook.com>"]
+description = "Call a maid to label old files and sweep them under the rug."
+readme = "README.md"
+repository = "https://github.com/noirgif/maid-sweeprs/"
+license = "MIT"
+categories = ["command-line-utilities"]
 
 [dependencies]
 tokio = { version = "1.28.0", features = ["full"] }
@@ -16,3 +20,6 @@ regex = "1.5"
 lazy_static = "1.4"
 clap = { version = "4.2.7", features = ["derive"] }
 once_cell = "1.17.1"
+
+[[bin]]
+name = "maid"
