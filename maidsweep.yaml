@@ -100,6 +100,9 @@ extensions:
   - m4v
   - mpg
   - mpeg
+  - ts
+  - ast
+  - ass
 
 filenames:
 - !!python/tuple

@@ -32,7 +32,6 @@ enum FileResult {
 unsafe impl Send for FileResult {}
 unsafe impl Sync for FileResult {}
 
-
 pub struct Exec {}
 
 #[async_trait]
@@ -220,15 +219,6 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, File
             }
         }
 
-        // Special cases
-        for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter() {
-            if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
-                for tag in file_tags.iter() {
-                    tags.push(tag.clone());
-                }
-            }
-        }
-
         // TODO: more file name/date based tagging
         if tags.is_empty() {
             // TODO: if it has no tag, and not part of a software
@@ -244,14 +234,16 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, File
         // match with given tags and dispatch
         // if no tags specified then dispatch them all
         if file_meta.tags.is_none() || file_meta.tags.as_ref().unwrap().is_empty() {
-            Choice {}.dispatch(
-                context,
-                FileMeta {
-                    path: path,
-                    tags: Some(tags),
-                    last_modified: None,
-                },
-            ).await?;
+            Choice {}
+                .dispatch(
+                    context,
+                    FileMeta {
+                        path: path,
+                        tags: Some(tags),
+                        last_modified: None,
+                    },
+                )
+                .await?;
             return Ok(FileResult::Ok(vec![]));
         }
 
@@ -281,50 +273,21 @@ pub struct Directory;
 impl Directory {
     async fn classify_and_tag<'a, 'b, M>(&'b self, context: Arc<M>, entry: DirEntry) -> ()
     where
-        M: MaidContext + 'a, 'a: 'b,
+        M: MaidContext + 'a,
+        'a: 'b,
     {
         let path = entry.path();
-        // if there is a file typical of a kind of directory, tag the directory and stop here
-        let mut match_result: Option<Vec<String>> = None;
-        for (file_tag, filename_patterns) in context.get_patterns().typical_files_re.iter() {
-            if match_result.is_some() {
-                break;
-            }
-
-            for filename_pattern in filename_patterns {
-                if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
-                    match_result = Some(vec![file_tag.clone()]);
-                    break;
-                }
-            }
-        }
-        if let Some(tags) = match_result {
-            match (Choice{}.dispatch(
-                    context.clone(),
-                    FileMeta {
-                        path,
-                        tags: Some(tags),
-                        last_modified: None,
-                    },
-                )
-                .await)
-            {
-                Ok(_) => (),
-                Err(e) => println!("Error: {}", e),
-            }
-            return;
-        }
-
         // try to match the folder name with other tags, if it fails, continue
-        match File.dispatch(
-            context.clone(),
-            FileMeta {
-                path: path.clone(),
-                tags: None,
-                last_modified: None,
-            },
-        )
-        .await
+        match File
+            .dispatch(
+                context.clone(),
+                FileMeta {
+                    path: entry.path().clone(),
+                    tags: None,
+                    last_modified: None,
+                },
+            )
+            .await
         {
             Ok(FileResult::DirectoryNoTag) => (),
             Ok(FileResult::Ok(_)) => return,
@@ -341,11 +304,12 @@ impl Directory {
                         last_modified: None,
                     },
                 )
-                .await {
-            Ok(_) => (),
-            Err(e) => println!("Error: {}", e),
+                .await
+            {
+                Ok(_) => (),
+                Err(e) => println!("Error: {}", e),
+            }
         }
-    }
     }
 }
 
@@ -361,20 +325,89 @@ where
     ) -> Result<(), Box<dyn std::error::Error>> {
         let directory = file_meta.path;
 
-        let mut entries = tokio::fs::read_dir(directory).await.unwrap();
-        let mut tasks = vec![];
-        loop { let result = entries.next_entry().await;
+        let mut entries = tokio::fs::read_dir(&directory).await.unwrap();
+        let mut filtered_entries = vec![];
+        loop {
+            let result = entries.next_entry().await;
             match result {
                 Ok(Some(entry)) => {
-                    tasks.push(tokio::spawn(Self{}.classify_and_tag(context.clone(), entry)));
-                },
+                    let path = entry.path();
+                    // if there is a file typical of a kind of directory, tag the directory and stop here
+                    let mut match_result: Option<Vec<String>> = None;
+                    for (file_tag, filename_patterns) in
+                        context.get_patterns().typical_files_re.iter()
+                    {
+                        if match_result.is_some() {
+                            break;
+                        }
+
+                        for filename_pattern in filename_patterns {
+                            if filename_pattern
+                                .is_match(path.file_name().unwrap().to_str().unwrap())
+                            {
+                                match_result = Some(vec![file_tag.clone()]);
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(tags) = match_result {
+                        // if such typical file is found, handle the parent directory
+                        // and return
+                        return Choice {}
+                            .dispatch(
+                                context.clone(),
+                                FileMeta {
+                                    path: directory,
+                                    tags: Some(tags),
+                                    last_modified: None,
+                                },
+                            )
+                            .await;
+                    }
+
+                    // If it is not found, find out if it is a special file
+                    // Special files are not part of a directory, and meaningful even when alone
+                    // So tagging/moving them sooner or later does not matter
+                    let mut special_tags = vec![];
+                    for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter()
+                    {
+                        if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
+                            for tag in file_tags.iter() {
+                                special_tags.push(tag.clone());
+                            }
+                        }
+                    }
+                    if !special_tags.is_empty() {
+                        match (Choice {}
+                            .dispatch(
+                                context.clone(),
+                                FileMeta {
+                                    path: path.clone(),
+                                    tags: Some(special_tags),
+                                    last_modified: None,
+                                },
+                            )
+                            .await)
+                        {
+                            Ok(_) => (),
+                            Err(e) => println!("Error: {}", e),
+                        }
+                        continue;
+                    }
+
+                    // otherwise proceed to classify the file
+                    filtered_entries.push(entry);
+                }
                 Err(e) => {
                     println!("Error: {}", e);
                     break;
-                },
-                _ => break
+                }
+                _ => break,
             }
         }
+        let tasks = filtered_entries.into_iter().map(|entry| tokio::spawn(
+            Self {}.classify_and_tag(context.clone(), entry),
+        ));
         for task in tasks {
             task.await?;
         }
