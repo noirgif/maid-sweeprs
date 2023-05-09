@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 /// Define a type that models our metadata.

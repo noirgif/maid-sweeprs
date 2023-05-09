@@ -1,10 +1,10 @@
 mod context;
 mod data;
 mod dispatcher;
-mod patterns;
+mod config;
 
 use crate::data::FileMeta;
-use clap::{arg, command, Parser, Subcommand};
+use clap::{arg, command, Parser};
 use context::PatternsContext;
 use futures::StreamExt;
 use mongodb::bson::doc;
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::vec;
 
-use crate::context::{AsyncIOContext, MongoDBContext, ThreadMotorContext};
+use crate::context::{AsyncIOContext, MongoDBContext, OperatingMode, ThreadMotorContext};
 use crate::dispatcher::{Directory, Dispatcher, Exec};
 
 pub struct MaidSweeper {
@@ -24,85 +24,100 @@ pub struct MaidSweeper {
 #[derive(Parser, Debug)]
 #[command(version, about = "Call the maid sweeper", long_about=None)]
 struct Args {
+    /// The operating mode. Can be either "tag" or "sweep".
+    mode: OperatingMode,
+    /// If set, the program will store the metadata in a MongoDB database when sweeping.
     #[arg(
         long,
-        default_value = "12",
-        help = "The maximum number of workers to use."
+        default_value = "false",
+        help = "Whether or not to print debug outputs"
     )]
-    max_workers: usize,
+    debug: bool,
+
+    #[arg(
+        long,
+        short = 'd',
+        default_value = "false",
+        help = "Whether or not to use MongoDB"
+    )]
+    use_mongodb: bool,
+
     #[arg(
         long,
         default_value = "maid-sweeper",
-        help = "The name of the database to use."
+        help = "The name of the MongoDB database to use."
     )]
     database_name: String,
+
     #[arg(
         long,
         default_value = "mongodb://localhost:27017",
         help = "The host of the MongoDB server."
     )]
     mongodb_host: String,
-    /// The path to the patterns configuration file. By default it is ~/.maid-sweeprs/patterns.yaml.
+
+    /// The path to the patterns configuration file. By default it is ~/.maidsweeprs.yaml.
     #[arg(short = 'c', long = "config")]
     config_file: Option<String>,
-    /// Enable debug output.
-    #[arg(long)]
-    debug: bool,
-    #[command(subcommand)]
-    subcommand: SubCommand,
-}
 
-#[derive(Debug, Subcommand)]
-enum SubCommand {
-    /// scan the paths and tag the files wherein
-    #[command(arg_required_else_help = true)]
-    Tag {
-        /// The paths to scan and label.
-        #[arg(required = true, value_name = "PATH")]
-        paths: Vec<PathBuf>,
-        /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
-        #[arg(
-            short = 'x',
-            long = "exec",
-            allow_hyphen_values = true,
-            value_terminator = ";"
-        )]
-        exec_args: Option<Vec<OsString>>,
-    },
-    /// sweep the files with the specified tags
-    Sweep {
-        /// The tags to sweep. If multiple tags are specified, they are treated as OR conditions.
-        #[arg(short = 't', long = "tag", required = true)]
-        tags: Vec<String>,
-        /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
-        #[arg(
-            short = 'x',
-            long = "exec",
-            allow_hyphen_values = true,
-            value_terminator = ";"
-        )]
-        exec_args: Option<Vec<OsString>>,
-    },
+    #[arg(
+        short = 't',
+        long = "tag",
+        value_name = "TAG",
+        help = "The tags to filter when sweeping, if not specified, all tags will be considered when storing info or cleaning."
+    )]
+    tags: Option<Vec<String>>,
+
+    /// The paths to scan and label.
+    #[arg(required = false,
+        num_args = 1..,
+        default_value = ".", 
+        value_name = "PATH")]
+    paths: Option<Vec<PathBuf>>,
+
+    /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
+    #[arg(
+        short = 'x',
+        long = "exec",
+        num_args = 1..,
+        allow_hyphen_values = true,
+        value_terminator = ";"
+    )]
+    exec_args: Option<Vec<OsString>>,
 }
 
 impl MaidSweeper {
     async fn run(args: Args) -> Result<(), Box<dyn Error>> {
-        match args.subcommand {
-            SubCommand::Tag { paths, exec_args } => {
-                let maid = Self {
-                    context: Arc::new(
-                        ThreadMotorContext::new(
-                            &args.database_name,
-                            &args.mongodb_host,
-                            args.debug,
-                            args.config_file,
-                            exec_args,
-                        )
-                        .await?,
-                    ),
-                };
-                let mut tasks = Vec::new();
+        let maid: MaidSweeper = Self {
+            context: Arc::new(
+                ThreadMotorContext::new(
+                    args.mode,
+                    args.use_mongodb,
+                    &args.database_name,
+                    &args.mongodb_host,
+                    args.debug,
+                    args.config_file,
+                    args.exec_args,
+                )
+                .await?,
+            ),
+        };
 
+        let mut new_tags: Vec<String> = Vec::new();
+        if let Some(tags) = args.tags {
+            for keyword in tags.into_iter() {
+                if let Some(synonyms) = maid.context.get_patterns().synonyms.get(&keyword) {
+                    new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
+                } else {
+                    new_tags.push(keyword);
+                }
+            }
+        }
+        let mut tasks = Vec::new();
+
+        match args.mode {
+            OperatingMode::Tag => {
+                let paths = args.paths.unwrap_or(vec![PathBuf::from(".")]);
                 for path in paths.iter() {
                     if maid.context.is_debug() {
                         println!("Tagging {:?}", path);
@@ -111,42 +126,19 @@ impl MaidSweeper {
                         maid.context.clone(),
                         FileMeta {
                             path: path.to_owned(),
-                            tags: None,
+                            tags: Some(new_tags.clone()),
                             last_modified: None,
                         },
                     ));
                 }
-
                 futures::future::join_all(tasks).await;
             }
-            SubCommand::Sweep { tags, exec_args } => {
-                let maid = Self {
-                    context: Arc::new(
-                        ThreadMotorContext::new(
-                            &args.database_name,
-                            &args.mongodb_host,
-                            args.debug,
-                            args.config_file,
-                            exec_args,
-                        )
-                        .await?,
-                    ),
-                };
-
-                let mut new_args = vec![];
-                for keyword in tags.iter() {
-                    if let Some(synonyms) = maid.context.get_patterns().synonyms.get(keyword) {
-                        new_args.extend(synonyms);
-                    } else {
-                        new_args.push(keyword);
-                    }
-                }
-
+            OperatingMode::Sweep => {
                 let mut cursor = maid
                     .context
                     .get_db()
                     .collection::<data::FileMetaCompat>(dispatcher::COLLECTION_NAME)
-                    .find(doc! {"tags": {"$in": new_args}}, None)
+                    .find(doc! {"tags": {"$in": new_tags}}, None)
                     .await?;
 
                 let exec = Exec {};
@@ -178,8 +170,9 @@ impl MaidSweeper {
 #[tokio::main]
 pub async fn main() {
     let matches = Args::parse();
-    match MaidSweeper::run(matches).await {
+    println!("{:?}", matches);
+    return match MaidSweeper::run(matches).await {
         Ok(_) => (),
         Err(e) => println!("Error: {}", e),
-    }
+    };
 }

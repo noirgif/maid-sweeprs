@@ -1,11 +1,13 @@
+use crate::config;
 use crate::context::MaidContext;
 use crate::data;
 use crate::data::FileMeta;
-
 use async_trait::async_trait;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::path::Path;
 use std::sync::Arc;
+use tokio::fs::DirEntry;
 
 pub(crate) const COLLECTION_NAME: &str = "tags";
 
@@ -24,20 +26,6 @@ where
 
 pub struct Exec {}
 
-enum ExecArg<'a> {
-    RefArg(&'a OsStr),
-    Arg(OsString),
-}
-
-impl<'a> AsRef<OsStr> for ExecArg<'a> {
-    fn as_ref(&self) -> &OsStr {
-        match self {
-            ExecArg::RefArg(arg) => arg.clone(),
-            ExecArg::Arg(arg) => arg.as_os_str(),
-        }
-    }
-}
-
 #[async_trait]
 impl<'a, 'b, M> Dispatcher<'a, 'b, M> for Exec
 where
@@ -50,8 +38,6 @@ where
         file_meta: FileMeta,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let path = file_meta.path;
-        // path replacement
-        // TODO: not sure about the arguments
         let tags = file_meta.tags.unwrap_or_default();
 
         let exec_args: Vec<OsString>;
@@ -61,32 +47,89 @@ where
             return Result::Err("No exec arguments provided".into());
         }
 
-        let mut replaced_args = exec_args.iter().map(|arg| match arg.to_str().unwrap() {
-            "{}" => ExecArg::RefArg(path.as_os_str()),
-            "{/}" => ExecArg::RefArg(path.file_name().unwrap()),
-            "{//}" => ExecArg::RefArg(path.parent().unwrap().as_os_str()),
-            "{.}" => ExecArg::Arg(path.with_extension("").into_os_string()),
-            "{/.}" => ExecArg::RefArg(path.file_stem().unwrap()),
-            "{1}" => ExecArg::Arg(
-                tags.get(0)
-                    .and_then(|s| Some(OsString::from(s)))
-                    .unwrap_or(OsString::new()),
-            ),
-            _ => ExecArg::RefArg(arg),
+        let path_str = String::from(path.to_str().unwrap_or(""));
+        let basename: String = path
+            .file_name()
+            .and_then(OsStr::to_str)
+            .unwrap_or("")
+            .into();
+        let dirname: String = path
+            .parent()
+            .and_then(Path::to_str)
+            .unwrap_or_default()
+            .into();
+        let basename_no_ext: String = path
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .unwrap_or_default()
+            .into();
+
+        // UNDONE: properly parse the command
+
+        let path_with_no_ext: String = path.with_extension("").to_str().unwrap_or_default().into();
+        let tags_str = format!("#{}", tags.join("#"));
+        if context.is_debug() {
+            println!("tags: {:?}", tags);
+            println!("path_str: {}", path_str);
+        }
+
+        let replaced_args = exec_args.iter().map(|arg| {
+            if context.is_debug() {
+                println!("arg: {}", arg.to_str().unwrap_or(""));
+            }
+            // do not replace shell special strings
+            match arg.to_str().unwrap_or("") {
+                "|" | "&" | "&&" | "<" | ">" | ">>" | "<<" => {
+                    return arg.clone().to_str().unwrap_or("").to_owned();
+                }
+                _ => (),
+            }
+
+            let mut replaced_arg = arg.clone().into_string().unwrap();
+            if tags.len() > 0 {
+                replaced_arg = replaced_arg.replace("{1}", &tags[0]);
+            }
+            if tags.len() > 1 {
+                replaced_arg = replaced_arg.replace("{2}", &tags[1]);
+            }
+            if tags.len() > 2 {
+                replaced_arg = replaced_arg.replace("{3}", &tags[2]);
+            }
+            replaced_arg = replaced_arg.replace("{0}", &tags_str);
+            replaced_arg = replaced_arg.replace("{.}", &path_with_no_ext);
+            replaced_arg = replaced_arg.replace("{/.}", &basename_no_ext);
+            replaced_arg = replaced_arg.replace("{//}", &dirname);
+            replaced_arg = replaced_arg.replace("{/}", &basename);
+            replaced_arg = replaced_arg.replace("{}", &path_str);
+            // shell escape and quote
+            replaced_arg = replaced_arg.replace(r"\", r"\\");
+            replaced_arg = replaced_arg.replace(r#"""#, r#"\""#);
+            replaced_arg = format!(r#""{}""#, replaced_arg);
+
+            replaced_arg
         });
 
         // TODO: pass multithreading context
-        if let Some(exec_path) = replaced_args.next() {
-            tokio::process::Command::new(exec_path)
-                .args(replaced_args)
-                .spawn()
-                .expect("Failed to execute command")
-                .wait()
-                .await?;
-            Ok(())
-        } else {
-            Result::Err("No exec arguments provided".into())
+        let find_shell = config::find_shell();
+        let mut shell_comm = match find_shell {
+            Some((ref shell, ref _arg1)) => tokio::process::Command::new(shell),
+            _ => return Result::Err("No shell found!".into()),
+        };
+
+        let exec_str = replaced_args.into_iter().collect::<Vec<String>>().join(" ");
+
+        if context.is_debug() {
+            println!("exec_str: {:?} {}", find_shell.as_ref().unwrap(), exec_str);
         }
+
+        shell_comm
+            .arg(&find_shell.as_ref().unwrap().1)
+            .arg(exec_str)
+            .spawn()
+            .expect("Failed to execute command")
+            .wait()
+            .await?;
+        Ok(())
     }
 }
 
@@ -122,6 +165,24 @@ where
         } else {
             Result::Err("No tags provided".into())
         }
+    }
+}
+
+pub struct Choice;
+
+#[async_trait]
+impl<'b, 'a: 'b, M: MaidContext + 'a> Dispatcher<'a, 'b, M> for Choice {
+    async fn dispatch(
+        &'b self,
+        context: Arc<M>,
+        file_meta: FileMeta,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if context.get_exec_args().is_some() {
+            Exec {}.dispatch(context, file_meta).await?;
+        } else {
+            Tag {}.dispatch(context, file_meta).await?;
+        }
+        Ok(())
     }
 }
 
@@ -165,21 +226,107 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M> for 
             tags = vec![String::from("misc")];
         }
 
-        Tag.dispatch(
-            context,
-            FileMeta {
-                path: path,
-                tags: Some(tags),
-                last_modified: None,
-            },
-        )
-        .await?;
-
+        // match with given tags and dispatch
+        for tag in tags.iter() {
+            if let Some(ref filter_tags) = file_meta.tags {
+                if filter_tags.contains(tag) {
+                    Choice {}
+                        .dispatch(
+                            context,
+                            FileMeta {
+                                path: path,
+                                tags: Some(tags),
+                                last_modified: None,
+                            },
+                        )
+                        .await?;
+                }
+            }
+            break;
+        }
         Ok(())
     }
 }
 
 pub struct Directory;
+
+impl Directory {
+    async fn classify_and_tag<'a, 'b, M>(&'b self, context: Arc<M>, entry: DirEntry) -> ()
+    where
+        M: MaidContext + 'a, 'a: 'b,
+    {
+        let path = entry.path();
+        // if it is a file typical of a directory, stop here
+        for (file_tags, filename_patterns) in context.get_patterns().typical_files_re.iter() {
+            let file_name = path.file_name().unwrap().to_str().unwrap();
+            for filename_pattern in filename_patterns {
+                if filename_pattern.is_match(file_name) {
+                    let result = Choice {}
+                        .dispatch(
+                            context.clone(),
+                            FileMeta {
+                                path: path.parent().unwrap().to_owned(),
+                                tags: Some(vec![String::from(file_tags)]),
+                                last_modified: None,
+                            },
+                        )
+                        .await;
+                    match result {
+                        Ok(_) => (),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                }
+            }
+        }
+
+        // handle special names, and skip tagging
+        for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter() {
+            if filename_pattern.is_match(&path.file_name().unwrap().to_str().unwrap()) {
+                let result = Choice {}
+                    .dispatch(
+                        context.clone(),
+                        FileMeta {
+                            path,
+                            tags: Some(file_tags.clone()),
+                            last_modified: None,
+                        },
+                    )
+                    .await;
+                match result {
+                    Ok(_) => (),
+                    Err(e) => println!("Error: {}", e),
+                }
+                return;
+            }
+        }
+        let result = if path.is_dir() {
+            Directory
+                .dispatch(
+                    context.clone(),
+                    FileMeta {
+                        path: path,
+                        tags: None,
+                        last_modified: None,
+                    },
+                )
+                .await
+        } else {
+            File.dispatch(
+                context.clone(),
+                FileMeta {
+                    path: path,
+                    tags: None,
+                    last_modified: None,
+                },
+            )
+            .await
+        };
+        match result {
+            Ok(_) => (),
+            Err(e) => println!("Error: {}", e),
+        }
+    }
+}
 
 #[async_trait]
 impl<'a, 'b: 'a, M: MaidContext + 'b> Dispatcher<'b, 'a, M> for Directory
@@ -194,78 +341,21 @@ where
         let directory = file_meta.path;
 
         let mut entries = tokio::fs::read_dir(directory).await.unwrap();
-        while let Some(entry) = entries.next_entry().await.unwrap() {
-            let path = entry.path();
-            // if it is a file typical of a directory, stop here
-            for (file_tags, filename_patterns) in context.get_patterns().typical_files_re.iter() {
-                let file_name = path.file_name().unwrap().to_str().unwrap();
-                for filename_pattern in filename_patterns {
-                    if filename_pattern.is_match(file_name) {
-                        Tag.dispatch(
-                            context.clone(),
-                            FileMeta {
-                                path: path.parent().unwrap().to_owned(),
-                                tags: Some(vec![String::from(file_tags)]),
-                                last_modified: None,
-                            },
-                        )
-                        .await?;
-                        return Ok(());
-                    }
-                }
+        let mut tasks = vec![];
+        loop { let result = entries.next_entry().await;
+            match result {
+                Ok(Some(entry)) => {
+                    tasks.push(tokio::spawn(Self{}.classify_and_tag(context.clone(), entry)));
+                },
+                Err(e) => {
+                    println!("Error: {}", e);
+                    break;
+                },
+                _ => break
             }
-
-            // handle special names, and skip tagging
-            for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter() {
-                if filename_pattern.is_match(&path.file_name().unwrap().to_str().unwrap()) {
-                    Tag.dispatch(
-                        context.clone(),
-                        FileMeta {
-                            path,
-                            tags: Some(file_tags.clone()),
-                            last_modified: None,
-                        },
-                    )
-                    .await?;
-                    return Ok(());
-                }
-            }
-
-            if path.is_dir() {
-                match Directory
-                    .dispatch(
-                        context.clone(),
-                        FileMeta {
-                            path: path,
-                            tags: None,
-                            last_modified: None,
-                        },
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("Error: {}", e);
-                    }
-                }
-            } else {
-                match File
-                    .dispatch(
-                        context.clone(),
-                        FileMeta {
-                            path: path,
-                            tags: None,
-                            last_modified: None,
-                        },
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("Error: {}", e);
-                    }
-                }
-            }
+        }
+        for task in tasks {
+            task.await?;
         }
 
         Ok(())

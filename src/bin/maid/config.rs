@@ -1,6 +1,8 @@
+use once_cell::sync::Lazy;
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::path::Path;
 use std::string::String;
 
@@ -28,10 +30,24 @@ pub struct Patterns {
 
 pub fn load_patterns<T>(config_path: T) -> Patterns
 where
-    T: AsRef<Path>,
+    T: AsRef<Path> + Clone,
 {
-    let patterns_yaml = std::fs::read_to_string::<T>(config_path).unwrap();
-    let patterns: PatternsYamlSchema = serde_yaml::from_str(&patterns_yaml).unwrap();
+    let patterns_yaml = std::fs::read_to_string::<T>(config_path.clone());
+    if patterns_yaml.is_err() {
+        eprintln!(
+            "Error: Could not find patterns file at {}.",
+            config_path.as_ref().display()
+        );
+        std::process::exit(1);
+    }
+    let patterns: Result<PatternsYamlSchema, serde_yaml::Error> =
+        serde_yaml::from_str(&patterns_yaml.unwrap());
+    if let Err(err) = patterns {
+        eprintln!("{}", err.to_string());
+
+        std::process::exit(1);
+    }
+    let patterns = patterns.unwrap();
 
     let typical_files_re = patterns
         .typical_files
@@ -73,5 +89,37 @@ where
         filenames_re,
         extensions,
         synonyms,
+    }
+}
+
+static SHELLS : Lazy<[String; 6]> = Lazy::new(|| [
+    env::var("SHELL").unwrap_or_default(),
+    env::var("COMSPEC").unwrap_or_default(),
+    "/bin/zsh".to_owned(),
+    "/bin/bash".to_owned(),
+    "/bin/ash".to_owned(),
+    "/bin/sh".to_owned(),
+]);
+
+pub fn find_shell() -> Option<(String, String)> {
+
+    let shell: Option<String> = SHELLS
+        .iter()
+        .filter(|shell| Path::new(shell).exists())
+        .next()
+        .and_then(|s| Some(s.to_owned()));
+
+    let  arg1  = 
+    
+    if env::var("COMSPEC").unwrap_or_default().eq(shell.clone().unwrap_or_default().as_str())   {
+        "/c"
+    } else {
+        "-c"
+    };
+
+    if shell.is_some() {
+        Some((shell.unwrap(), arg1.to_owned()))
+    } else {
+        None
     }
 }

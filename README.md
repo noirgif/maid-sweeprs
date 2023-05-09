@@ -26,14 +26,27 @@ Like Toki, she has two modes:
 ## Installation
 
 1. Run `cargo install maid-sweeprs`.
+2. Install MongoDB and start the service (optional).
 
 ## Usage
 
-1. Copy `patterns.yaml` to `~/.maid-sweepers/patterns.yaml`.
-2. Start a MongoDB instance.
-3. Call `maid tag D:\Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
-4. Call `maid sweep -t video game -x del \q \f {}`, and the maid is going to remove all 'video' or 'game' tagged files and directories.
+Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, but you want to specify the path with `-c` option.
+
+### Tagging
+
+
+
+### With MongoDB
+1. Call `maid tag -d --mongodb-host <MONGODB_URL> ~/Videos/Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
+2. Call `maid sweep -d --mongodb-host <MONGODB_URL> -x rm -rf {}`, and the maid is going to remove all 'video' or 'game' tagged files and directories.
     * Any other commands is OK as well
+    * {1}, {2}, {3} is the first, second and third tag, whereas {0} is all the tags, concatenated like #video#game#, like in TagLyst, for you to append the basename after.
+        * Haven't implemented multiple tags, so {1} to go
+
+### Without MongoDB
+
+Call `maid tag ~/Videos/Study -x mkdir -p Tagged/{1} "&&" mv {} {1}`, which moves all tagged files and directories to `Tagged` directory.
+I didn't know that, but things like `&&` need to be escaped.
 
 ## Ideas
 
