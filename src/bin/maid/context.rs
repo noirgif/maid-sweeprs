@@ -3,7 +3,7 @@ use mongodb::{options::ClientOptions, Client};
 use dirs;
 use crate::config;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OperatingMode {
     Tag,
     Sweep,

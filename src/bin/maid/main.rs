@@ -1,12 +1,12 @@
+mod config;
 mod context;
 mod data;
 mod dispatcher;
-mod config;
 
 use crate::data::FileMeta;
 use clap::{arg, command, Parser};
 use context::PatternsContext;
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 use mongodb::bson::doc;
 use std::error::Error;
 use std::ffi::OsString;
@@ -87,6 +87,85 @@ struct Args {
 }
 
 impl MaidSweeper {
+    fn sweep(
+        &self,
+        paths: Option<Vec<PathBuf>>,
+        tags: Option<Vec<String>>,
+    ) -> Vec<std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + Send>>> {
+        let mut new_tags: Vec<String> = Vec::new();
+        if let Some(tags) = tags {
+            for keyword in tags.into_iter() {
+                if let Some(synonyms) = self.context.get_patterns().synonyms.get(&keyword) {
+                    new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
+                } else {
+                    new_tags.push(keyword);
+                }
+            }
+        }
+        let mut tasks = Vec::new();
+
+        let paths = paths.unwrap_or(vec![PathBuf::from(".")]);
+        for path in paths.iter() {
+            if self.context.is_debug() {
+                println!("Tagging {:?}", path);
+            }
+            tasks.push(Directory.dispatch(
+                self.context.clone(),
+                FileMeta {
+                    path: path.to_owned(),
+                    tags: Some(new_tags.clone()),
+                    last_modified: None,
+                },
+            ));
+        }
+        tasks
+    }
+
+    async fn mongodb_sweep(
+        &self,
+        _paths: Option<Vec<PathBuf>>,
+        tags: Option<Vec<String>>,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut new_tags: Vec<String> = Vec::new();
+        if let Some(tags) = tags {
+            for keyword in tags.into_iter() {
+                if let Some(synonyms) = self.context.get_patterns().synonyms.get(&keyword) {
+                    new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
+                } else {
+                    new_tags.push(keyword);
+                }
+            }
+        }
+        let mut cursor = self
+            .context
+            .get_db()
+            .collection::<data::FileMetaCompat>(dispatcher::COLLECTION_NAME)
+            .find(doc! {"tags": {"$in": new_tags}}, None)
+            .await?;
+
+        let exec = Exec {};
+        while let Some(item) = cursor.next().await {
+            match item {
+                Ok(item) => {
+                    exec.dispatch(
+                        self.context.clone(),
+                        FileMeta {
+                            path: PathBuf::from(&item.path.clone()),
+                            tags: Some(item.tags),
+                            last_modified: Some(item.last_modified),
+                        },
+                    )
+                    .await?;
+                }
+                Err(item) => {
+                    println!("Error obtaining data from database: {:?}", item);
+                    return Err(Box::new(item));
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn run(args: Args) -> Result<(), Box<dyn Error>> {
         let maid: MaidSweeper = Self {
             context: Arc::new(
@@ -103,65 +182,11 @@ impl MaidSweeper {
             ),
         };
 
-        let mut new_tags: Vec<String> = Vec::new();
-        if let Some(tags) = args.tags {
-            for keyword in tags.into_iter() {
-                if let Some(synonyms) = maid.context.get_patterns().synonyms.get(&keyword) {
-                    new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
-                } else {
-                    new_tags.push(keyword);
-                }
-            }
-        }
-        let mut tasks = Vec::new();
-
-        match args.mode {
-            OperatingMode::Tag => {
-                let paths = args.paths.unwrap_or(vec![PathBuf::from(".")]);
-                for path in paths.iter() {
-                    if maid.context.is_debug() {
-                        println!("Tagging {:?}", path);
-                    }
-                    tasks.push(Directory.dispatch(
-                        maid.context.clone(),
-                        FileMeta {
-                            path: path.to_owned(),
-                            tags: Some(new_tags.clone()),
-                            last_modified: None,
-                        },
-                    ));
-                }
-                futures::future::join_all(tasks).await;
-            }
-            OperatingMode::Sweep => {
-                let mut cursor = maid
-                    .context
-                    .get_db()
-                    .collection::<data::FileMetaCompat>(dispatcher::COLLECTION_NAME)
-                    .find(doc! {"tags": {"$in": new_tags}}, None)
-                    .await?;
-
-                let exec = Exec {};
-                while let Some(item) = cursor.next().await {
-                    match item {
-                        Ok(item) => {
-                            exec.dispatch(
-                                maid.context.clone(),
-                                FileMeta {
-                                    path: PathBuf::from(&item.path.clone()),
-                                    tags: Some(item.tags),
-                                    last_modified: Some(item.last_modified),
-                                },
-                            )
-                            .await?;
-                        }
-                        Err(item) => {
-                            println!("Error obtaining data from database: {:?}", item);
-                            return Err(Box::new(item));
-                        }
-                    }
-                }
-            }
+        if args.mode == OperatingMode::Sweep || !args.use_mongodb {
+            let tasks = maid.sweep(args.paths, args.tags);
+            futures::future::join_all(tasks).await;
+        } else {
+            maid.mongodb_sweep(args.paths, args.tags).await?;
         }
         Ok(())
     }
@@ -169,9 +194,11 @@ impl MaidSweeper {
 
 #[tokio::main]
 pub async fn main() {
-    let matches = Args::parse();
-    println!("{:?}", matches);
-    return match MaidSweeper::run(matches).await {
+    let args = Args::parse();
+    if args.debug {
+        println!("{:?}", args);
+    }
+    return match MaidSweeper::run(args).await {
         Ok(_) => (),
         Err(e) => println!("Error: {}", e),
     };

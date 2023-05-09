@@ -30,11 +30,7 @@ Like Toki, she has two modes:
 
 ## Usage
 
-Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, but you want to specify the path with `-c` option.
-
-### Tagging
-
-
+Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, in that case you need to specify the path with `-c` option.
 
 ### With MongoDB
 1. Call `maid tag -d --mongodb-host <MONGODB_URL> ~/Videos/Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
@@ -45,8 +41,8 @@ Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, but you wan
 
 ### Without MongoDB
 
-Call `maid tag ~/Videos/Study -x mkdir -p Tagged/{1} "&&" mv {} {1}`, which moves all tagged files and directories to `Tagged` directory.
-I didn't know that, but things like `&&` need to be escaped.
+Call `maid sweep ~/Videos/Study -x mkdir -p Tagged/{1} "&&" mv {} {1}`, which moves all tagged files and directories to `Tagged` directory, categorized.
+I didn't know that before, but things like `&&` need to be escaped.
 
 ## Ideas
 
@@ -58,6 +54,3 @@ I didn't know that, but things like `&&` need to be escaped.
 - Group similarly named files: 01.jpg, 02.jpg, etc.
 - Understand human language so they can toss away garbage
 - Optionally clean up the database after sweeping.
-- Single line mode: do the tag, sweep, and clean up database entries with a single command.
-    * Skip MongoDB if possible
-- Generate and reads from config files
