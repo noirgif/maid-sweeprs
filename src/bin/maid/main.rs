@@ -3,6 +3,7 @@ mod data;
 mod dispatcher;
 mod patterns;
 
+use crate::data::FileMeta;
 use clap::{arg, command, Parser, Subcommand};
 use context::PatternsContext;
 use futures::StreamExt;
@@ -10,13 +11,14 @@ use mongodb::bson::doc;
 use std::error::Error;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::vec;
 
 use crate::context::{AsyncIOContext, MongoDBContext, ThreadMotorContext};
 use crate::dispatcher::{Directory, Dispatcher, Exec};
 
 pub struct MaidSweeper {
-    context: ThreadMotorContext,
+    context: Arc<ThreadMotorContext>,
 }
 
 #[derive(Parser, Debug)]
@@ -40,6 +42,10 @@ struct Args {
         help = "The host of the MongoDB server."
     )]
     mongodb_host: String,
+    /// The path to the patterns configuration file. By default it is ~/.maid-sweeprs/patterns.yaml.
+    #[arg(short = 'c', long = "config")]
+    config_file: Option<String>,
+    /// Enable debug output.
     #[arg(long)]
     debug: bool,
     #[command(subcommand)]
@@ -54,33 +60,46 @@ enum SubCommand {
         /// The paths to scan and label.
         #[arg(required = true, value_name = "PATH")]
         paths: Vec<PathBuf>,
-        /// The path to the patterns configuration file.
-        #[arg(short = 'c', long = "config")]
-        config_file: Option<String>,
+        /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
+        #[arg(
+            short = 'x',
+            long = "exec",
+            allow_hyphen_values = true,
+            value_terminator = ";"
+        )]
+        exec_args: Option<Vec<OsString>>,
     },
     /// sweep the files with the specified tags
     Sweep {
         /// The tags to sweep. If multiple tags are specified, they are treated as OR conditions.
         #[arg(short = 't', long = "tag", required = true)]
         tags: Vec<String>,
-        /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path. No \; is required.
-        #[arg(short = 'x', long = "exec")]
-        exec_args: Vec<OsString>,
+        /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
+        #[arg(
+            short = 'x',
+            long = "exec",
+            allow_hyphen_values = true,
+            value_terminator = ";"
+        )]
+        exec_args: Option<Vec<OsString>>,
     },
 }
 
 impl MaidSweeper {
     async fn run(args: Args) -> Result<(), Box<dyn Error>> {
         match args.subcommand {
-            SubCommand::Tag { paths, config_file } => {
+            SubCommand::Tag { paths, exec_args } => {
                 let maid = Self {
-                    context: ThreadMotorContext::new(
-                        &args.database_name,
-                        &args.mongodb_host,
-                        args.debug,
-                        config_file,
-                    )
-                    .await?,
+                    context: Arc::new(
+                        ThreadMotorContext::new(
+                            &args.database_name,
+                            &args.mongodb_host,
+                            args.debug,
+                            args.config_file,
+                            exec_args,
+                        )
+                        .await?,
+                    ),
                 };
                 let mut tasks = Vec::new();
 
@@ -88,20 +107,30 @@ impl MaidSweeper {
                     if maid.context.is_debug() {
                         println!("Tagging {:?}", path);
                     }
-                    tasks.push(Directory.dispatch(&maid.context, path.to_owned()));
+                    tasks.push(Directory.dispatch(
+                        maid.context.clone(),
+                        FileMeta {
+                            path: path.to_owned(),
+                            tags: None,
+                            last_modified: None,
+                        },
+                    ));
                 }
 
                 futures::future::join_all(tasks).await;
             }
             SubCommand::Sweep { tags, exec_args } => {
                 let maid = Self {
-                    context: ThreadMotorContext::new::<PathBuf>(
-                        &args.database_name,
-                        &args.mongodb_host,
-                        args.debug,
-                        None,
-                    )
-                    .await?,
+                    context: Arc::new(
+                        ThreadMotorContext::new(
+                            &args.database_name,
+                            &args.mongodb_host,
+                            args.debug,
+                            args.config_file,
+                            exec_args,
+                        )
+                        .await?,
+                    ),
                 };
 
                 let mut new_args = vec![];
@@ -116,22 +145,23 @@ impl MaidSweeper {
                 let mut cursor = maid
                     .context
                     .get_db()
-                    .collection::<data::Item>(dispatcher::COLLECTION_NAME)
+                    .collection::<data::FileMetaCompat>(dispatcher::COLLECTION_NAME)
                     .find(doc! {"tags": {"$in": new_args}}, None)
                     .await?;
 
-                let exec = Exec { args: exec_args };
-
+                let exec = Exec {};
                 while let Some(item) = cursor.next().await {
                     match item {
                         Ok(item) => {
-                            match exec
-                                .dispatch(&maid.context, PathBuf::from(&item.path.clone()))
-                                .await
-                            {
-                                Ok(_) => (),
-                                Err(e) => println!("Error sweeping {}: {}", item.path, e),
-                            }
+                            exec.dispatch(
+                                maid.context.clone(),
+                                FileMeta {
+                                    path: PathBuf::from(&item.path.clone()),
+                                    tags: Some(item.tags),
+                                    last_modified: Some(item.last_modified),
+                                },
+                            )
+                            .await?;
                         }
                         Err(item) => {
                             println!("Error obtaining data from database: {:?}", item);

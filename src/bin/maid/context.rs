@@ -23,9 +23,12 @@ pub struct ThreadMotorContext {
     database_name: String,
     debug: bool,
     patterns: patterns::Patterns,
+    exec_args: Option<Vec<std::ffi::OsString>>,
 }
 
-pub trait MaidContext: PatternsContext + AsyncIOContext + MongoDBContext + Sync {}
+pub trait MaidContext: PatternsContext + AsyncIOContext + MongoDBContext + Send + Sync {
+    fn get_exec_args(&self) -> Option<Vec<std::ffi::OsString>>;
+}
 
 impl ThreadMotorContext {
     pub async fn new<T>(
@@ -33,6 +36,7 @@ impl ThreadMotorContext {
         host: &str,
         debug: bool,
         config_file: Option<T>,
+        exec_args: Option<Vec<std::ffi::OsString>>,
     ) -> Result<Self, Box<dyn Error>>
     where
         T: AsRef<Path>,
@@ -50,6 +54,7 @@ impl ThreadMotorContext {
             database_name: database_name.to_string(),
             debug: debug,
             patterns: patterns,
+            exec_args: exec_args,
         })
     }
 }
@@ -72,6 +77,11 @@ impl PatternsContext for ThreadMotorContext {
     }
 }
 
+unsafe impl Send for ThreadMotorContext {}
 unsafe impl Sync for ThreadMotorContext {}
 
-impl MaidContext for ThreadMotorContext {}
+impl MaidContext for ThreadMotorContext {
+    fn get_exec_args(&self) -> Option<Vec<std::ffi::OsString>> {
+        self.exec_args.clone()
+    }
+}
