@@ -1,12 +1,12 @@
 mod config;
 mod context;
-mod data;
+mod datatype;
 mod dispatcher;
 
-use crate::data::FileMeta;
+use crate::datatype::FileMeta;
 use clap::{arg, command, Parser};
 use context::PatternsContext;
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use mongodb::bson::doc;
 use std::error::Error;
 use std::ffi::OsString;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::vec;
 
 use crate::context::{AsyncIOContext, MongoDBContext, OperatingMode, ThreadMotorContext};
-use crate::dispatcher::{Directory, Dispatcher, Exec};
+use crate::dispatcher::{Directory, Processor, Exec};
 
 pub struct MaidSweeper {
     context: Arc<ThreadMotorContext>,
@@ -87,38 +87,51 @@ struct Args {
 }
 
 impl MaidSweeper {
+    async fn directory_dispatch_handle(
+        context: Arc<ThreadMotorContext>,
+        file_meta: FileMeta,
+    ) -> () {
+        match Directory.process(context.clone(), file_meta).await {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+            }
+        }
+    }
+
     fn sweep(
         &self,
         paths: Option<Vec<PathBuf>>,
         tags: Option<Vec<String>>,
-    ) -> Vec<std::pin::Pin<Box<dyn Future<Output = Result<(), Box<dyn Error>>> + Send>>> {
+    ) -> impl Iterator<Item = tokio::task::JoinHandle<()>> + '_ {
+        // expand synonyms
         let mut new_tags: Vec<String> = Vec::new();
         if let Some(tags) = tags {
-            for keyword in tags.into_iter() {
-                if let Some(synonyms) = self.context.get_patterns().synonyms.get(&keyword) {
+            for tag in tags.into_iter() {
+                if let Some(synonyms) = self.context.get_patterns().synonyms.get(&tag) {
                     new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
                 } else {
-                    new_tags.push(keyword);
+                    new_tags.push(tag);
                 }
             }
         }
-        let mut tasks = Vec::new();
 
         let paths = paths.unwrap_or(vec![PathBuf::from(".")]);
-        for path in paths.iter() {
-            if self.context.is_debug() {
-                println!("Tagging {:?}", path);
-            }
-            tasks.push(Directory.dispatch(
+        if self.context.is_debug() {
+            println!("Tagging {:?}", paths);
+        }
+
+        // map to paths
+        paths.into_iter().map(move |path|
+            // can fork, as different directories are independent
+            tokio::spawn(Self::directory_dispatch_handle(
                 self.context.clone(),
                 FileMeta {
                     path: path.to_owned(),
                     tags: Some(new_tags.clone()),
                     last_modified: None,
                 },
-            ));
-        }
-        tasks
+            )))
     }
 
     async fn mongodb_sweep(
@@ -139,7 +152,7 @@ impl MaidSweeper {
         let mut cursor = self
             .context
             .get_db()
-            .collection::<data::FileMetaCompat>(dispatcher::COLLECTION_NAME)
+            .collection::<datatype::FileMetaCompat>(dispatcher::COLLECTION_NAME)
             .find(doc! {"tags": {"$in": new_tags}}, None)
             .await?;
 
@@ -147,7 +160,7 @@ impl MaidSweeper {
         while let Some(item) = cursor.next().await {
             match item {
                 Ok(item) => {
-                    exec.dispatch(
+                    exec.process(
                         self.context.clone(),
                         FileMeta {
                             path: PathBuf::from(&item.path.clone()),

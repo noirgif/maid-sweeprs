@@ -1,5 +1,5 @@
 use once_cell::sync::Lazy;
-use regex::Regex;
+use regex::{Regex, RegexSet};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -22,7 +22,7 @@ struct FilenamePattern {
 
 #[derive(Debug)]
 pub struct Patterns {
-    pub typical_files_re: HashMap<String, Vec<Regex>>,
+    pub typical_files_re: HashMap<String, RegexSet>,
     pub filenames_re: Vec<(Vec<String>, Regex)>,
     pub extensions: HashMap<String, HashSet<String>>,
     pub synonyms: HashMap<String, HashSet<String>>,
@@ -55,10 +55,7 @@ where
         .map(|(key, patterns)| {
             (
                 key,
-                patterns
-                    .into_iter()
-                    .map(|pattern| Regex::new(&pattern).unwrap())
-                    .collect(),
+                RegexSet::new(patterns).unwrap(),
             )
         })
         .collect();

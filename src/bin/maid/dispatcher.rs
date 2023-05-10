@@ -1,8 +1,9 @@
 use crate::config;
 use crate::context::MaidContext;
-use crate::data;
-use crate::data::FileMeta;
+use crate::datatype;
+use crate::datatype::FileMeta;
 use async_trait::async_trait;
+use std::error::Error;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::path::Path;
@@ -12,16 +13,11 @@ use tokio::fs::DirEntry;
 pub(crate) const COLLECTION_NAME: &str = "tags";
 
 #[async_trait]
-pub trait Dispatcher<'a, 'b, M, R>: Send + Sync
+pub trait Processor<M, R>: Send + Sync
 where
-    M: MaidContext + 'a,
-    'a: 'b,
+    M: MaidContext + 'static,
 {
-    async fn dispatch(
-        &'b self,
-        context: Arc<M>,
-        args: FileMeta,
-    ) -> Result<R, Box<dyn std::error::Error>>;
+    async fn process(&self, context: Arc<M>, args: FileMeta) -> Result<R, Box<dyn Error>>;
 }
 
 enum FileResult {
@@ -35,16 +31,11 @@ unsafe impl Sync for FileResult {}
 pub struct Exec {}
 
 #[async_trait]
-impl<'a, 'b, M> Dispatcher<'a, 'b, M, ()> for Exec
+impl<M> Processor<M, ()> for Exec
 where
-    M: MaidContext + 'a,
-    'a: 'b,
+    M: MaidContext + 'static,
 {
-    async fn dispatch(
-        &'b self,
-        context: Arc<M>,
-        file_meta: FileMeta,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
         let path = file_meta.path;
         let tags = file_meta.tags.unwrap_or_default();
 
@@ -54,6 +45,9 @@ where
         } else {
             return Result::Err("No exec arguments provided".into());
         }
+
+        // To properly and safely replace the arguments, a LR(0) parser is needed.
+        // But for now, we just opt for a simple string replace.
 
         let path_str = String::from(path.to_str().unwrap_or(""));
         let basename: String = path
@@ -72,19 +66,23 @@ where
             .unwrap_or_default()
             .into();
 
-        // UNDONE: properly parse the command
-
         let path_with_no_ext: String = path.with_extension("").to_str().unwrap_or_default().into();
         let tags_str = format!("#{}", tags.join("#"));
+
         if context.is_debug() {
             println!("tags: {:?}", tags);
             println!("path_str: {}", path_str);
+            println!(
+                "exec_args: {}",
+                exec_args
+                    .iter()
+                    .map(|osstr| osstr.clone().into_string().unwrap_or_default())
+                    .collect::<Vec<String>>()
+                    .join(" ")
+            );
         }
 
         let replaced_args = exec_args.iter().map(|arg| {
-            if context.is_debug() {
-                println!("arg: {}", arg.to_str().unwrap_or(""));
-            }
             // do not replace shell special strings
             match arg.to_str().unwrap_or("") {
                 "|" | "&" | "&&" | "<" | ">" | ">>" | "<<" => {
@@ -103,18 +101,18 @@ where
             if tags.len() > 2 {
                 replaced_arg = replaced_arg.replace("{3}", &tags[2]);
             }
-            replaced_arg = replaced_arg.replace("{0}", &tags_str);
-            replaced_arg = replaced_arg.replace("{.}", &path_with_no_ext);
-            replaced_arg = replaced_arg.replace("{/.}", &basename_no_ext);
-            replaced_arg = replaced_arg.replace("{//}", &dirname);
-            replaced_arg = replaced_arg.replace("{/}", &basename);
-            replaced_arg = replaced_arg.replace("{}", &path_str);
-            // shell escape and quote
-            replaced_arg = replaced_arg.replace(r"\", r"\\");
-            replaced_arg = replaced_arg.replace(r#"""#, r#"\""#);
-            replaced_arg = format!(r#""{}""#, replaced_arg);
-
-            replaced_arg
+            replaced_arg = replaced_arg
+                .replace("{0}", &tags_str)
+                .replace("{.}", &path_with_no_ext)
+                .replace("{/.}", &basename_no_ext)
+                .replace("{//}", &dirname)
+                .replace("{/}", &basename)
+                .replace("{}", &path_str)
+                // shell escape and quote
+                .replace(r"\", r"\\")
+                .replace(r#"""#, r#"\""#);
+            // surround with quotes
+            format!(r#""{}""#, replaced_arg)
         });
 
         // TODO: pass multithreading context
@@ -144,24 +142,19 @@ where
 pub struct Tag;
 
 #[async_trait]
-impl<'a, 'b, M> Dispatcher<'a, 'b, M, ()> for Tag
+impl<M> Processor<M, ()> for Tag
 where
-    M: MaidContext + 'a,
-    'a: 'b,
+    M: MaidContext,
 {
-    async fn dispatch(
-        &'b self,
-        context: Arc<M>,
-        file_meta: FileMeta,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
         let collection = context
             .get_db()
-            .collection::<data::FileMetaCompat>(COLLECTION_NAME);
+            .collection::<datatype::FileMetaCompat>(COLLECTION_NAME);
         // TODO: remove copy
         if let Some(tags) = file_meta.tags {
             collection
                 .insert_one(
-                    data::FileMetaCompat {
+                    datatype::FileMetaCompat {
                         path: file_meta.path,
                         tags: tags.to_vec(),
                         last_modified: 0,
@@ -179,16 +172,12 @@ where
 pub struct Choice;
 
 #[async_trait]
-impl<'b, 'a: 'b, M: MaidContext + 'a> Dispatcher<'a, 'b, M, ()> for Choice {
-    async fn dispatch(
-        &'b self,
-        context: Arc<M>,
-        file_meta: FileMeta,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+impl<M: MaidContext + 'static> Processor<M, ()> for Choice {
+    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
         if context.get_exec_args().is_some() {
-            Exec {}.dispatch(context, file_meta).await?;
+            Exec {}.process(context, file_meta).await?;
         } else {
-            Tag {}.dispatch(context, file_meta).await?;
+            Tag {}.process(context, file_meta).await?;
         }
         Ok(())
     }
@@ -196,13 +185,15 @@ impl<'b, 'a: 'b, M: MaidContext + 'a> Dispatcher<'a, 'b, M, ()> for Choice {
 
 pub struct File;
 
+impl File {}
+
 #[async_trait]
-impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, FileResult> for File {
-    async fn dispatch(
-        &'b self,
+impl<M: crate::context::MaidContext + 'static> Processor<M, FileResult> for File {
+    async fn process(
+        &self,
         context: Arc<M>,
         file_meta: FileMeta,
-    ) -> Result<FileResult, Box<dyn std::error::Error>> {
+    ) -> Result<FileResult, Box<dyn Error>> {
         let path = file_meta.path;
         // Match types based on extensions
         let extension = String::from(
@@ -212,30 +203,38 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, File
         );
 
         // Extension-based tagging
-        let mut tags = vec![];
-        for (file_type, extensions) in context.get_patterns().extensions.iter() {
-            if extensions.contains(&extension) {
-                tags.push(file_type.clone());
-            }
+        // Find all that matches
+        let mut tags: Vec<String> = context
+            .get_patterns()
+            .extensions
+            .iter()
+            .filter_map(|(file_type, extensions)| {
+                if extensions.contains(&extension) {
+                    Some(file_type.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if tags.is_empty() && path.is_dir() {
+            return Ok(FileResult::DirectoryNoTag);
         }
 
-        // TODO: more file name/date based tagging
+        // TODO: if a file has no tag, and not part of a software
+        // try to read its name and content
+        // if unintelligible, tag it as garbage
+
         if tags.is_empty() {
-            // TODO: if it has no tag, and not part of a software
-            // try to read its name and content
-            // if unintelligible, tag it as garbage
-            if path.is_dir() {
-                return Ok(FileResult::DirectoryNoTag);
-            } else {
-                tags = vec![String::from("misc")];
-            }
+            tags.push("misc".into());
         }
 
         // match with given tags and dispatch
         // if no tags specified then dispatch them all
         if file_meta.tags.is_none() || file_meta.tags.as_ref().unwrap().is_empty() {
+            // when dispatching, tags means what kind of file it is
             Choice {}
-                .dispatch(
+                .process(
                     context,
                     FileMeta {
                         path: path,
@@ -251,7 +250,7 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, File
             if let Some(ref filter_tags) = file_meta.tags {
                 if filter_tags.contains(tag) {
                     Choice {}
-                        .dispatch(
+                        .process(
                             context,
                             FileMeta {
                                 path: path,
@@ -271,15 +270,26 @@ impl<'b, 'a: 'b, M: crate::context::MaidContext + 'a> Dispatcher<'a, 'b, M, File
 pub struct Directory;
 
 impl Directory {
-    async fn classify_and_tag<'a, 'b, M>(&'b self, context: Arc<M>, entry: DirEntry) -> ()
+    /// Directly tagging a directory
+    async fn handle<M>(self, context: Arc<M>, file_meta: FileMeta) -> ()
     where
-        M: MaidContext + 'a,
-        'a: 'b,
+        M: MaidContext + 'static,
+    {
+        match (Choice {}.process(context, file_meta).await) {
+            Ok(_) => (),
+            Err(e) => println!("Error: {}", e),
+        }
+    }
+
+    /// Calls another dispatcher to process a directory or file
+    async fn recurse<M>(self, context: Arc<M>, entry: DirEntry) -> ()
+    where
+        M: MaidContext + 'static,
     {
         let path = entry.path();
         // try to match the folder name with other tags, if it fails, continue
         match File
-            .dispatch(
+            .process(
                 context.clone(),
                 FileMeta {
                     path: entry.path().clone(),
@@ -296,7 +306,7 @@ impl Directory {
 
         if path.is_dir() {
             match Directory
-                .dispatch(
+                .process(
                     context.clone(),
                     FileMeta {
                         path: path,
@@ -311,105 +321,118 @@ impl Directory {
             }
         }
     }
+
+    fn match_special_file<M>(&self, context: &Arc<M>, path: &Path) -> Option<Vec<String>>
+    where
+        M: MaidContext + 'static,
+    {
+        context
+            .get_patterns()
+            .filenames_re
+            .iter()
+            .find_map(|(file_tags, filename_pattern)| {
+                if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
+                    Some(file_tags.clone())
+                } else {
+                    None
+                }
+            })
+    }
 }
 
 #[async_trait]
-impl<'a, 'b: 'a, M: MaidContext + 'b> Dispatcher<'b, 'a, M, ()> for Directory
+impl<M: MaidContext + 'static> Processor<M, ()> for Directory
 where
     M: MaidContext,
 {
-    async fn dispatch(
-        &'a self,
-        context: Arc<M>,
-        file_meta: FileMeta,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
         let directory = file_meta.path;
+        let mut entries = tokio::fs::read_dir(&directory).await?;
 
-        let mut entries = tokio::fs::read_dir(&directory).await.unwrap();
+        // first pass to filter out typical directories and special files
         let mut filtered_entries = vec![];
+        let mut file_tag_tasks: Vec<tokio::task::JoinHandle<_>> = vec![];
         loop {
+            // IO error in listing the directory
             let result = entries.next_entry().await;
-            match result {
-                Ok(Some(entry)) => {
-                    let path = entry.path();
-                    // if there is a file typical of a kind of directory, tag the directory and stop here
-                    let mut match_result: Option<Vec<String>> = None;
-                    for (file_tag, filename_patterns) in
-                        context.get_patterns().typical_files_re.iter()
-                    {
-                        if match_result.is_some() {
-                            break;
-                        }
-
-                        for filename_pattern in filename_patterns {
-                            if filename_pattern
-                                .is_match(path.file_name().unwrap().to_str().unwrap())
-                            {
-                                match_result = Some(vec![file_tag.clone()]);
-                                break;
-                            }
-                        }
-                    }
-                    if let Some(tags) = match_result {
-                        // if such typical file is found, handle the parent directory
-                        // and return
-                        return Choice {}
-                            .dispatch(
-                                context.clone(),
-                                FileMeta {
-                                    path: directory,
-                                    tags: Some(tags),
-                                    last_modified: None,
-                                },
-                            )
-                            .await;
-                    }
-
-                    // If it is not found, find out if it is a special file
-                    // Special files are not part of a directory, and meaningful even when alone
-                    // So tagging/moving them sooner or later does not matter
-                    let mut special_tags = vec![];
-                    for (file_tags, filename_pattern) in context.get_patterns().filenames_re.iter()
-                    {
-                        if filename_pattern.is_match(path.file_name().unwrap().to_str().unwrap()) {
-                            for tag in file_tags.iter() {
-                                special_tags.push(tag.clone());
-                            }
-                        }
-                    }
-                    if !special_tags.is_empty() {
-                        match (Choice {}
-                            .dispatch(
-                                context.clone(),
-                                FileMeta {
-                                    path: path.clone(),
-                                    tags: Some(special_tags),
-                                    last_modified: None,
-                                },
-                            )
-                            .await)
-                        {
-                            Ok(_) => (),
-                            Err(e) => println!("Error: {}", e),
-                        }
-                        continue;
-                    }
-
-                    // otherwise proceed to classify the file
-                    filtered_entries.push(entry);
-                }
-                Err(e) => {
-                    println!("Error: {}", e);
-                    break;
-                }
-                _ => break,
+            if result.is_err() {
+                println!("Error: {}", result.err().unwrap());
+                break;
             }
+
+            let result = result.unwrap();
+            // there is no next entry
+            if result.is_none() {
+                break;
+            }
+
+            let entry = result.unwrap();
+            let path = entry.path();
+
+            // if there is a file typical of a kind of directory, tag the directory and stop here
+            // typical means there is no ambiguity (but it should be able to have multiple tags)
+            // so there is no need to continue
+            // TODO: support multiple tags for typical
+            let match_result: Option<Vec<String>> =
+                context.get_patterns().typical_files_re.iter().find_map(
+                    |(file_tag, filename_patterns)| {
+                        if filename_patterns.is_match(path.file_name().unwrap().to_str().unwrap()) {
+                            return Some(vec![file_tag.clone()]);
+                        }
+                        None
+                    },
+                );
+
+            if let Some(tags) = match_result {
+                // if such typical file is found, handle the parent directory
+                // and return
+                // as this is the only file that matters, we pass up its error
+                // with multiple files we ignore them
+                return Choice {}
+                    .process(
+                        context.clone(),
+                        FileMeta {
+                            path: directory,
+                            tags: Some(tags),
+                            last_modified: None,
+                        },
+                    )
+                    .await;
+            }
+
+            // Find out if it is a special file
+            // Special files are not part of a directory, and meaningful even when alone
+            // So tagging/moving them sooner or later does not matter
+
+            // if it is a special file, add its handling to the tasks
+            if let Some(special_tags) = self.match_special_file(&context, &path) {
+                file_tag_tasks.push(tokio::spawn(Self {}.handle(
+                    context.clone(),
+                    FileMeta {
+                        path: path,
+                        tags: Some(special_tags),
+                        last_modified: None,
+                    },
+                )));
+                // no need to process it again
+                // skip to next file
+                continue;
+            }
+
+            // otherwise proceed to add the files to the list of second pass
+            filtered_entries.push(entry);
         }
-        let tasks = filtered_entries.into_iter().map(|entry| tokio::spawn(
-            Self {}.classify_and_tag(context.clone(), entry),
-        ));
-        for task in tasks {
-            task.await?;
+
+        file_tag_tasks.extend(
+            filtered_entries
+                .into_iter()
+                .map(|entry| tokio::spawn(Self {}.recurse(context.clone(), entry))),
+        );
+
+        for task in file_tag_tasks {
+            if let Err(e) = task.await {
+                println!("Error: {}", e);
+            }
         }
 
         Ok(())

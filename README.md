@@ -1,8 +1,8 @@
 # Maid Sweeper
 
-This is the Rust version of [maid-sweeper](github.com/noirgif/maid-sweeper), a tool to clean up your files and directories.
+If you have a lot of files unorganized, and do not want to break up directories like code projects and applications, this <s>tool</s> maid is for you.
 
-No, instead of cleaning the unused files, it calls a maid to label them and sweep them under the rug.
+This is the Rust version of [maid-sweeper](https://github.com/noirgif/maid-sweeper), a <s>tool</s> service to classify files and directories.
 
 If desired, the maid can practice Danshari given permission. For example, she can [sell your unused iPad for money](https://comic-days.com/episode/3269754496647364302).
 
@@ -11,14 +11,15 @@ Like Toki, she has two modes:
 `tag`: Label the files/directories automatically, based on their types and names.
 
 - code projects and application directories are labeled, and their children are not scanned
-- others are labeled based on the extensions
+  - if there is a DLL, you know what it is for, the maid also knows.
+- others are labeled based on the extensions, or names if its name indicates that it is a special kind of file.
 
 `sweep`: Carry out actions based on the labels.
 
 ## Feature
 
-* Toki, ohhhhh
-* MongoDB for fast indexing
+* Uses Tokio for asynchronous processing. <s>Toki, uohhhhh😭😭😭</s>
+* MongoDB for fast indexing if you want to 
 * Save time by not scanning every single file inside code and program directories and not checking the metadata
 * Use yaml to configure the rules and tags
 * Kyoufu!
@@ -26,11 +27,12 @@ Like Toki, she has two modes:
 ## Installation
 
 1. Run `cargo install maid-sweeprs`.
-2. Install MongoDB and start the service (optional).
+2. Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, in that case you need to specify the path with `-c` option.
+  * Feel free to modify the rules
+3. Install MongoDB and start the service (optional).
 
 ## Usage
 
-Copy `maidsweep.yaml` to `~/.maidsweep.yaml`. Or any place you like, in that case you need to specify the path with `-c` option.
 
 ### With MongoDB
 1. Call `maid tag -d --mongodb-host <MONGODB_URL> ~/Videos/Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.

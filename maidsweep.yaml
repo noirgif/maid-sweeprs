@@ -5,6 +5,8 @@ extensions:
   - ogg
   - flac
   - aac
+  # It is supposed to exist somewhere in the world
+  - alac
   - m4a
   - wma
   book:
@@ -110,7 +112,7 @@ filenames:
   - ^\d{4}\.\d{4,5}\.pdf$
 - !!python/tuple
   - - game
-    - dmm
+    - DMM
   - ^[a-z]{2,7}_\d{4}(\.zip|\.part\d+\.(exe|rar))?$
 - !!python/tuple
   - - media
@@ -121,6 +123,7 @@ filenames:
     - DLsite
   - ^BJ\d{6,8}\.zip$
 
+# They act as a multicast when searching/filtering
 synonyms:
   archive:
   - compressed
@@ -196,27 +199,40 @@ typical_files:
   - README(\.md)?$
   - ^LICENSE$
   game:
+# executables
   - ^Game.exe$
+  - ^.*\.swf$
+## Kirikiri
   - ^.*\.xp3$
-  - ^Game.rgss3a$
+## Buriko General Interpreter
   - ^BGI.exe$
+## Rondo Duo
+  - ^Ron2.exe$
+## Saves
   - ^.*\.arc$
-  - ^save$
-  - ^savedata$
-  - ^.*\.dat$
-  - ^.*\.sav$
   - ^.*\.rpgsave$
+  - ^save$
+  - ^saves$
+  - ^savedata$
+## asset files
+  - ^.*\.dat$
+  - ^Game.rgss3a$
+  - ^.*\.sav$
   - ^.*\.mpk$
   - ^.*\.pak$
-  - ^Ron2.exe$
   - ^.*\.rpyc$
+## folders
+  - ^BGM$
   - ^renpy$
   - ^tyrano$
+## libs
   - ^UnityPlayer.dll$
-  - ^BGM$
-  - ^root\.pfs
+  ## Unity
   - ^.*_Data$
+## misc
+  - ^root\.pfs
   - ^README\.txt$
+# it will match after failing to match games
   software:
   - ^.*\.dll$
   - ^Unins\w*\.exe$
