@@ -199,7 +199,7 @@ impl<M: crate::context::MaidContext + 'static> Processor<M, FileResult> for File
         let extension = String::from(
             path.extension()
                 .and_then(|os_str| os_str.to_str())
-                .unwrap_or(""),
+                .unwrap_or("").to_ascii_lowercase()
         );
 
         // Extension-based tagging

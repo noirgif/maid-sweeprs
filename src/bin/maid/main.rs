@@ -1,7 +1,7 @@
 mod config;
 mod context;
 mod datatype;
-mod dispatcher;
+mod processor;
 
 use crate::datatype::FileMeta;
 use clap::{arg, command, Parser};
@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::vec;
 
 use crate::context::{AsyncIOContext, MongoDBContext, OperatingMode, ThreadMotorContext};
-use crate::dispatcher::{Directory, Processor, Exec};
+use crate::processor::{Directory, Processor, Exec};
 
 pub struct MaidSweeper {
     context: Arc<ThreadMotorContext>,
@@ -152,7 +152,7 @@ impl MaidSweeper {
         let mut cursor = self
             .context
             .get_db()
-            .collection::<datatype::FileMetaCompat>(dispatcher::COLLECTION_NAME)
+            .collection::<datatype::FileMetaCompat>(processor::COLLECTION_NAME)
             .find(doc! {"tags": {"$in": new_tags}}, None)
             .await?;
 
