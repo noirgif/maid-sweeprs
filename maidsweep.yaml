@@ -9,6 +9,9 @@ extensions:
   - alac
   - m4a
   - wma
+  - mid
+  # place lyrics and music together
+  - lrc
   book:
   - epub
   - mobi
@@ -52,6 +55,7 @@ extensions:
   - png
   - gif
   - bmp
+  - tif
   - tiff
   - svg
   - webp
@@ -77,6 +81,11 @@ extensions:
   - json
   - yml
   - yaml
+  - jl
+  - nb
+  - ipynb
+  # sorry typescript users, if it is in a project it may survive
+  # - ts
   spreadsheet:
   - xls
   - xlsx
@@ -103,7 +112,7 @@ extensions:
   - mpg
   - mpeg
   - ts
-  - ast
+  # place videos and subtitles together
   - ass
 
 filenames:
@@ -232,3 +241,7 @@ typical_files:
   software:
   - '^.*\.dll$'
   - '^Unins\w*\.exe$'
+  database:
+  - '^.*\.ldb$'
+  - '^.*\.sst$'
+  - '^.*\.sqlite$'
