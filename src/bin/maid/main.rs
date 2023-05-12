@@ -87,11 +87,12 @@ struct Args {
 }
 
 impl MaidSweeper {
-    async fn directory_dispatch_handle(
+    async fn dispatch<P, T>(
+        processor: P,
         context: Arc<ThreadMotorContext>,
         file_meta: FileMeta,
-    ) -> () {
-        match Directory.process(context.clone(), file_meta).await {
+    ) -> () where P: Processor<ThreadMotorContext, T> + 'static {
+        match processor.process(context.clone(), file_meta).await {
             Ok(_) => (),
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -124,7 +125,8 @@ impl MaidSweeper {
         // map to paths
         paths.into_iter().map(move |path|
             // can fork, as different directories are independent
-            tokio::spawn(Self::directory_dispatch_handle(
+            tokio::spawn(Self::dispatch(
+                Directory {},
                 self.context.clone(),
                 FileMeta {
                     path: path.to_owned(),
@@ -156,24 +158,30 @@ impl MaidSweeper {
             .find(doc! {"tags": {"$in": new_tags}}, None)
             .await?;
 
-        let exec = Exec {};
+
+        let mut tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
         while let Some(item) = cursor.next().await {
             match item {
                 Ok(item) => {
-                    exec.process(
+                    tasks.push(tokio::spawn(Self::dispatch(
+                        Exec {},
                         self.context.clone(),
                         FileMeta {
                             path: PathBuf::from(&item.path.clone()),
                             tags: Some(item.tags),
                             last_modified: Some(item.last_modified),
                         },
-                    )
-                    .await?;
+                    )));
                 }
                 Err(item) => {
                     println!("Error obtaining data from database: {:?}", item);
                     return Err(Box::new(item));
                 }
+            }
+        }
+        for task in tasks {
+            if let Err(e) = task.await {
+                eprintln!("Error: {}", e);
             }
         }
         Ok(())

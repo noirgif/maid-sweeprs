@@ -107,21 +107,17 @@ extensions:
   - ass
 
 filenames:
-- !!python/tuple
-  - - paper
-  - ^\d{4}\.\d{4,5}\.pdf$
-- !!python/tuple
-  - - game
+- - - paper
+  - '^\d{4}\.\d{4,5}\.pdf$'
+- - - game
     - DMM
-  - ^[a-z]{2,7}_\d{4}(\.zip|\.part\d+\.(exe|rar))?$
-- !!python/tuple
-  - - media
+  - '^[a-z]{2,7}_\d{4}(\.zip|\.part\d+\.(exe|rar))?$'
+- - - media
     - DLsite
-  - ^(RJ|VJ)\d{6,8}(\.zip|\.part\d+\.(exe|rar))?$
-- !!python/tuple
-  - - book
+  - '^(RJ|VJ)\d{6,8}(\.zip|\.part\d+\.(exe|rar))?$'
+- - - book
     - DLsite
-  - ^BJ\d{6,8}\.zip$
+  - '^BJ\d{6,8}\.zip$'
 
 # They act as a multicast when searching/filtering
 synonyms:
@@ -145,94 +141,94 @@ synonyms:
 
 typical_files:
   album:
-  - ^.*\.cue$
+  - '^.*\.cue$'
   code-project:
-  - ^\.git$
-  - ^\.hg$
-  - ^\.svn$
-  - ^\.bzr$
-  - ^\.gitignore$
-  - ^\.gitattributes$
-  - ^\.hgignore$
-  - ^\.npmignore$
-  - ^\.dockerignore$
-  - ^package\.json$
-  - ^yarn\.lock$
-  - ^Gemfile$
-  - ^Gemfile\.lock$
-  - ^Pipfile$
-  - ^Pipfile\.lock$
-  - ^requirements\.txt$
-  - ^go\.mod$
-  - ^go\.sum$
-  - ^Cargo\.toml$
-  - ^Cargo\.lock$
-  - ^composer\.json$
-  - ^composer\.lock$
-  - ^.*csproj$
-  - ^.*fsproj$
-  - ^.*vbproj$
-  - ^gradlew$
-  - ^gradlew\.bat$
-  - ^build\.gradle$
-  - ^pom\.xml$
-  - ^Makefile$
-  - ^CMakeLists\.txt$
-  - ^up\.py$
-  - ^Rakefile$
-  - ^Gruntfile\.js$
-  - ^gulpfile\.js$
-  - ^webpack\.config\.js$
-  - ^rollup\.config\.js$
-  - ^\.travis\.yml$
-  - ^\.circleci$
-  - ^\.github$
-  - ^Dockerfile$
-  - ^Vagrantfile$
-  - ^\.env$
-  - ^\.editorconfig$
-  - ^\.prettierrc$
-  - ^\.eslintrc$
-  - ^tsconfig\.json$
-  - ^\.vscode$
-  - ^.*\.tex$
-  - README(\.md)?$
-  - ^LICENSE$
+  - '^\.git$'
+  - '^\.hg$'
+  - '^\.svn$'
+  - '^\.bzr$'
+  - '^\.gitignore$'
+  - '^\.gitattributes$'
+  - '^\.hgignore$'
+  - '^\.npmignore$'
+  - '^\.dockerignore$'
+  - '^package\.json$'
+  - '^yarn\.lock$'
+  - '^Gemfile$'
+  - '^Gemfile\.lock$'
+  - '^Pipfile$'
+  - '^Pipfile\.lock$'
+  - '^requirements\.txt$'
+  - '^go\.mod$'
+  - '^go\.sum$'
+  - '^Cargo\.toml$'
+  - '^Cargo\.lock$'
+  - '^composer\.json$'
+  - '^composer\.lock$'
+  - '^.*csproj$'
+  - '^.*fsproj$'
+  - '^.*vbproj$'
+  - '^gradlew$'
+  - '^gradlew\.bat$'
+  - '^build\.gradle$'
+  - '^pom\.xml$'
+  - '^Makefile$'
+  - '^CMakeLists\.txt$'
+  - '^up\.py$'
+  - '^Rakefile$'
+  - '^Gruntfile\.js$'
+  - '^gulpfile\.js$'
+  - '^webpack\.config\.js$'
+  - '^rollup\.config\.js$'
+  - '^\.travis\.yml$'
+  - '^\.circleci$'
+  - '^\.github$'
+  - '^Dockerfile$'
+  - '^Vagrantfile$'
+  - '^\.env$'
+  - '^\.editorconfig$'
+  - '^\.prettierrc$'
+  - '^\.eslintrc$'
+  - '^tsconfig\.json$'
+  - '^\.vscode$'
+  - '^.*\.tex$'
+  - 'README(\.md)?$'
+  - '^LICENSE$'
   game:
-# executables
-  - ^Game.exe$
-  - ^.*\.swf$
-## Kirikiri
-  - ^.*\.xp3$
-## Buriko General Interpreter
-  - ^BGI.exe$
-## Rondo Duo
-  - ^Ron2.exe$
-## Saves
-  - ^.*\.arc$
-  - ^.*\.rpgsave$
-  - ^save$
-  - ^saves$
-  - ^savedata$
-## asset files
-  - ^.*\.dat$
-  - ^Game.rgss3a$
-  - ^.*\.sav$
-  - ^.*\.mpk$
-  - ^.*\.pak$
-  - ^.*\.rpyc$
-## folders
-  - ^BGM$
-  - ^renpy$
-  - ^tyrano$
-## libs
-  - ^UnityPlayer.dll$
+  # executables
+  - '^Game.exe$'
+  - '^.*\.swf$'
+  ## Kirikiri
+  - '^.*\.xp3$'
+  ## Buriko General Interpreter
+  - '^BGI.exe$'
+  ## Rondo Duo
+  - '^Ron2.exe$'
+  ## Saves
+  - '^.*\.arc$'
+  - '^.*\.rpgsave$'
+  - '^save$'
+  - '^saves$'
+  - '^savedata$'
+  ## asset files
+  - '^.*\.dat$'
+  - '^Game.rgss3a$'
+  - '^.*\.sav$'
+  - '^.*\.mpk$'
+  - '^.*\.pak$'
+  - '^.*\.rpyc$'
+  ## folders
+  - '^BGM$'
+  - '^renpy$'
+  - '^tyrano$'
+  ## libs
+  - '^UnityPlayer.dll$'
   ## Unity
-  - ^.*_Data$
-## misc
-  - ^root\.pfs
-  - ^README\.txt$
-# it will match after failing to match games
+  - '^.*_Data$'
+  ## misc
+  - '^root\.pfs'
+  - '^README\.txt$'
+  # it' will match after failing to match games'
   software:
-  - ^.*\.dll$
-  - ^Unins\w*\.exe$
+  - '^.*\.dll$'
+  - '^Unins\w*\.exe$'
