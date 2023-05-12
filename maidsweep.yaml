@@ -245,3 +245,4 @@ typical_files:
   - '^.*\.ldb$'
   - '^.*\.sst$'
   - '^.*\.sqlite$'
+  - '^mongod\.lock$'

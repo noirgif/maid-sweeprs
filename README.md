@@ -6,15 +6,16 @@ This is the Rust version of [maid-sweeper](https://github.com/noirgif/maid-sweep
 
 If desired, the maid can practice Danshari given permission. For example, she can [sell your unused iPad for money](https://comic-days.com/episode/3269754496647364302).
 
-Like Toki, she has two modes:
+Like Toki in Blue Archive, she is a maid with two modes:
 
-`tag`: Label the files/directories automatically, based on their types and names.
+Online: Label the files/directories and save them in a mongodb database. When dispatching those files it can also read the entries from the database. Useful if you want to sweep the same directory multiple times or keep a statistics of the files.
+
+Offline: Label the files/directories and dispatch them immediately. Useful if you want to sweep a directory once.
 
 - code projects and application directories are labeled, and their children are not scanned
   - if there is a DLL, you know what it is for, the maid also knows.
 - others are labeled based on the extensions, or names if its name indicates that it is a special kind of file.
 
-`sweep`: Carry out actions based on the labels.
 
 ## Feature
 
@@ -33,18 +34,30 @@ Like Toki, she has two modes:
 
 ## Usage
 
+`maid [--use-mongodb] [--mongodb-host <MONGODB_URL>] [-c <CONFIG_PATH>] [-t <TAGS>] PATH ACTIONS`
+
+* `--use-mongodb` uses mongodb entries for sweeping.
+* `--mongodb-host` specifies the mongodb url, default is `mongodb://localhost:27017`.
+* `-c` specifies the path to the config file, default is `~/.maidsweep.yaml`.
+* `-t` specifies files with which tags to sweep, default is any tag.
+
+`ACTIONS = [-x ARGS] | [--cp <DESTINATION>] | [--mv <DESTINATION>] | [--save]`
+
+* `-x` is like `--exec` in find, and `-x` in `fd`, it executes a command.
+* `--cp`, `--mv` copies or moves a file to `<destination>/<first tag of the file>/`.
+* `--save` saves the entries to the database, you can then specify `--use-mongodb` to read the entries from the database for sweeping.
+
 
 ### With MongoDB
-1. Call `maid tag -d --mongodb-host <MONGODB_URL> ~/Videos/Study`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
-2. Call `maid sweep -d --mongodb-host <MONGODB_URL> -x rm -rf {}`, and the maid is going to remove all 'video' or 'game' tagged files and directories.
-    * Any other commands is OK as well
-    * {1}, {2}, {3} is the first, second and third tag, whereas {0} is all the tags, concatenated like #video#game#, like in TagLyst, for you to append the basename after.
-        * Haven't implemented multiple tags, so {1} to go
+1. Start a MongoDB service.
+2. Call `maid --mongodb-host <MONGODB_URL> ~/Videos/Study --save`, then you can find tagged entries in the database. Sweeping works on all directories tagged.
+3. Call `maid --use-mongodb --mongodb-host <MONGODB_URL> -t video game --mv classified`, and the maid is going to move all 'video' or 'game' tagged files and directories to a `classified/video`, and `classified.
 
 ### Without MongoDB
 
-Call `maid sweep ~/Videos/Study -x mkdir -p Tagged/{1} "&&" mv {} {1}`, which moves all tagged files and directories to `Tagged` directory, categorized.
-I didn't know that before, but things like `&&` need to be escaped.
+Call `maid ~/Videos/Study -x --cp Tagged`, the maid copies all tagged files and directories to `Tagged` directory, categorized.
+
+
 
 ## Ideas
 

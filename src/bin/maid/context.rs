@@ -1,99 +1,71 @@
-use std::{error::Error, path::{Path, PathBuf}, str::FromStr};
+use std::{error::Error, path::PathBuf};
 use mongodb::{options::ClientOptions, Client};
 use dirs;
 use crate::config::{self, MaidConfig};
 
-
-pub trait AsyncIOContext {
-    fn is_debug(&self) -> bool;
+pub struct MongoDBContext {
+    pub client: Client,
+    pub database: mongodb::Database,
 }
 
-pub trait PatternsContext {
-    fn get_patterns(&self) -> &config::Patterns;
-}
+impl MongoDBContext {
+    pub async fn new(config: &MaidConfig
+    ) -> Result<Self, Box<dyn Error>>
+    {
+        let options: ClientOptions = ClientOptions::parse(format!("{}", config.mongodb_host)).await?;
+        let client = Client::with_options(options)?;
+        let database = client.database("maidsweep");
 
-pub trait MaidContext: AsyncIOContext + PatternsContext + Sync + Send + 'static {
-    fn get_config(&self) -> &MaidConfig;
-}
+        Ok(MongoDBContext {
+           client, database})
+    }
 
-pub struct SimpleContext {
-    config: MaidConfig,
-    patterns: config::Patterns,
-}
-
-impl AsyncIOContext for SimpleContext {
-    fn is_debug(&self) -> bool {
-        self.config.debug
+    pub fn get_db(&self) -> &mongodb::Database {
+        &self.database
     }
 }
 
-impl PatternsContext for SimpleContext {
-    fn get_patterns(&self) -> &config::Patterns {
-        &self.patterns
-    }
+pub struct MaidContext {
+    pub config: MaidConfig,
+    pub patterns: config::Patterns,
+    pub mongodb: Option<MongoDBContext>
 }
 
-impl SimpleContext {
-    pub fn new(config: MaidConfig) -> Self {
-        let patterns = if let Some(path) = config.config_file {
+
+impl MaidContext {
+    pub fn is_debug(&self) -> bool {
+        self.get_config().debug
+    }
+
+    pub fn get_config(&self) -> &MaidConfig {
+        &self.config
+    }
+
+    pub fn get_db(&self) -> Option<&mongodb::Database> {
+        if let Some(ref mongodb) = self.mongodb {
+            Some(mongodb.get_db())
+        } else {
+            None
+        }
+    }
+
+    pub async fn new(config: MaidConfig) -> Self {
+        let patterns = if let Some(ref path) = config.config_file {
             config::load_patterns(path)
         } else {
             config::load_patterns(PathBuf::from(dirs::home_dir().unwrap().join(".maidsweep.yaml")))
         };
-        SimpleContext { config, patterns }
+
+        let mongodb = if config.use_mongodb || config.save {
+            Some(MongoDBContext::new(&config).await.unwrap())
+        }
+        else {
+            None
+        };
+
+        MaidContext { config, mongodb, patterns }
     }
 }
 
-impl MaidContext for SimpleContext {
-    fn get_config(&self) -> &MaidConfig {
-        &self.config
-    }
-}
-
-pub struct MongoDBContext {
-    simp_context: SimpleContext,
-    client: Client,
-    database: mongodb::Database,
-}
-
-impl MongoDBContext {
-    pub async fn new(
-       config: MaidConfig, 
-    ) -> Result<Self, Box<dyn Error>>
-    {
-        let options: ClientOptions = ClientOptions::parse_async(format!("{}", config.mongodb_host)).await?;
-        let client = Client::with_options(options)?;
-        let database = client.database("maidsweep");
-        let simp_context = SimpleContext::new(config);
-
-        Ok(MongoDBContext {
-           client, simp_context, database})
-    }
-
-    pub fn get_db(&self) -> mongodb::Database {
-        self.database
-    }
-}
-
-impl AsyncIOContext for MongoDBContext {
-    fn is_debug(&self) -> bool {
-        self.simp_context.is_debug()
-    }
-}
-
-impl PatternsContext for MongoDBContext {
-    fn get_patterns(&self) -> &config::Patterns {
-        self.simp_context.get_patterns()
-    }
-}
-
-
-
-unsafe impl Send for MongoDBContext {}
-unsafe impl Sync for MongoDBContext {}
-
-impl MaidContext for MongoDBContext {
-    fn get_config(&self) -> &MaidConfig {
-        self.simp_context.get_config()
-    }
-}
+unsafe impl Send for MaidContext {}
+unsafe impl Sync for MaidContext {}

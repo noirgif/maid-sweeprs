@@ -153,7 +153,7 @@ pub struct MaidConfig {
     #[arg(short = 'c', long = "config")]
     pub config_file: Option<String>,
 
-    /// "The tags to filter when sweeping, if not specified, all tags will be considered when storing info or cleaning."
+    /// The tags to filter when sweeping, if not specified, all tags will be considered when storing info or cleaning.
     #[arg(
         short = 't',
         long = "tag",
@@ -168,7 +168,7 @@ pub struct MaidConfig {
         value_name = "PATH")]
     pub paths: Option<Vec<PathBuf>>,
 
-    /// If set to true, hidden files will be considered when sweeping.
+    /// If set to true, hidden files will be considered when sweeping. For UNIX only.
     #[arg(
         short = 'H',
         long = "hidden",
@@ -179,7 +179,6 @@ pub struct MaidConfig {
     /// Can be used to copy files to a directory.
     #[arg(
         long = "cp",
-        num_args = 1,
         value_name = "PATH",
     )]
     pub copy_to: Option<PathBuf>,
@@ -187,7 +186,6 @@ pub struct MaidConfig {
     /// Save the metadata to mongodb.
     #[arg(
         long = "save",
-        num_args = 1,
         value_name = "MONGODB_URI",
     )]
     pub save: bool,

@@ -5,19 +5,45 @@ use crate::datatype::FileMeta;
 use async_trait::async_trait;
 use std::error::Error;
 use std::ffi::OsStr;
-use std::ffi::OsString;
+use std::fmt::{self, Display, Formatter};
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs::DirEntry;
+use tokio::process::Command;
 
 pub(crate) const COLLECTION_NAME: &str = "tags";
 
+#[derive(Debug)]
+pub struct ProcessError {
+    pub message: String,
+}
+
+impl Display for ProcessError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "ProcessError: {}", self.message)
+    }
+}
+
+impl From<String> for ProcessError {
+    fn from(string: String) -> Self {
+        ProcessError { message: string }
+    }
+}
+
+impl From<&str> for ProcessError {
+    fn from(string: &str) -> Self {
+        ProcessError {
+            message: string.to_string(),
+        }
+    }
+}
+
+impl Error for ProcessError {}
+
 #[async_trait]
-pub trait Processor<M, R>: Send + Sync
-where
-    M: MaidContext + 'static,
-{
-    async fn process(&self, context: Arc<M>, args: FileMeta) -> Result<R, Box<dyn Error>>;
+pub trait Processor<R>: Send + Sync {
+    async fn process(self, context: Arc<MaidContext>, args: FileMeta) -> Result<R, ProcessError>;
 }
 
 enum FileResult {
@@ -31,20 +57,20 @@ unsafe impl Sync for FileResult {}
 pub struct Exec {}
 
 #[async_trait]
-impl<M> Processor<M, ()> for Exec
-where
-    M: MaidContext + 'static,
-{
-    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
+impl Processor<()> for Exec {
+    async fn process(
+        self,
+        context: Arc<MaidContext>,
+        file_meta: FileMeta,
+    ) -> Result<(), ProcessError> {
         let path = file_meta.path;
         let tags = file_meta.tags.unwrap_or_default();
 
-        let exec_args: Vec<OsString>;
-        if let Some(args) = context.get_exec_args() {
-            exec_args = args;
+        let exec_args = if let Some(ref args) = context.get_config().exec_args {
+            args
         } else {
-            return Result::Err("No exec arguments provided".into());
-        }
+            return Err("No exec arguments provided".into());
+        };
 
         // To properly and safely replace the arguments, a LR(0) parser is needed.
         // But for now, we just opt for a simple string replace.
@@ -128,13 +154,26 @@ where
             println!("exec_str: {:?} {}", find_shell.as_ref().unwrap(), exec_str);
         }
 
-        shell_comm
+        match shell_comm
             .arg(&find_shell.as_ref().unwrap().1)
             .arg(exec_str)
             .spawn()
             .expect("Failed to execute command")
             .wait()
-            .await?;
+            .await
+        {
+            Ok(status) => {
+                if !status.success() {
+                    return Result::Err("Command failed".into());
+                }
+            }
+            Err(e) => {
+                return Result::Err(ProcessError::from(format!(
+                    "Failed to execute command: {}",
+                    e
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -142,17 +181,19 @@ where
 pub struct Tag;
 
 #[async_trait]
-impl<M> Processor<M, ()> for Tag
-where
-    M: MaidContext,
-{
-    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
+impl Processor<()> for Tag {
+    async fn process(
+        self,
+        context: Arc<MaidContext>,
+        file_meta: FileMeta,
+    ) -> Result<(), ProcessError> {
         let collection = context
             .get_db()
+            .unwrap()
             .collection::<datatype::FileMetaCompat>(COLLECTION_NAME);
         // TODO: remove copy
         if let Some(tags) = file_meta.tags {
-            collection
+            match collection
                 .insert_one(
                     datatype::FileMetaCompat {
                         path: file_meta.path,
@@ -161,10 +202,144 @@ where
                     },
                     None,
                 )
-                .await?;
-            Ok(())
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    return Result::Err(ProcessError::from(format!(
+                        "Failed to insert file meta: {}",
+                        e
+                    )));
+                }
+            }
         } else {
             Result::Err("No tags provided".into())
+        }
+    }
+}
+
+pub struct Move {
+    is_copy: bool,
+}
+
+impl Move {
+    pub fn new(is_copy: bool) -> Self {
+        Self { is_copy }
+    }
+}
+
+fn wrap_error<E>(e: E) -> ProcessError
+where
+    E: Error,
+{
+    ProcessError::from(format!("IO Error: {}", e.to_string()))
+}
+
+#[async_trait]
+impl Processor<()> for Move {
+    async fn process(
+        self,
+        context: Arc<MaidContext>,
+        file_meta: FileMeta,
+    ) -> Result<(), ProcessError> {
+        // move the file to the directory
+        // if the directory does not exist, create it
+
+        let tags = file_meta.tags.as_ref();
+        let subdir = if let Some(t) = tags {
+            if t.len() > 0 {
+                &t[0]
+            } else {
+                return Result::Err(
+                    format!(
+                        "No tags available for {}",
+                        file_meta.path.to_str().unwrap_or_default()
+                    )
+                    .into(),
+                );
+            }
+        } else {
+            return Result::Err(
+                format!(
+                    "No tags available for {}",
+                    file_meta.path.to_str().unwrap_or_default()
+                )
+                .into(),
+            );
+        };
+
+        let target_path = if self.is_copy { 
+            context.get_config().copy_to.clone().unwrap().join(subdir)
+        } else {
+            context.get_config().move_to.clone().unwrap().join(subdir)
+        };
+
+        let result = if !target_path.exists() {
+            fs::create_dir_all(&target_path)
+        } else {
+            Ok(())
+        };
+
+        if result.is_err() {
+            return Result::Err(format!("Failed to create directory: {}", subdir).into());
+        }
+
+        let exit_result = match (std::env::consts::OS, self.is_copy) {
+            ("windows", false) => {
+                Command::new("move")
+                    .arg(file_meta.path)
+                    .arg(target_path)
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            }
+            ("windows", true) => {
+                Command::new("xcopy")
+                    .arg(file_meta.path)
+                    .arg(target_path)
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            }
+            (_, false) => {
+                Command::new("mv")
+                    .args(&[
+                        file_meta.path.to_str().unwrap(),
+                        target_path.to_str().unwrap(),
+                    ])
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            }
+            (_, true) => {
+                Command::new("cp")
+                    .arg("-r")
+                    .arg(file_meta.path)
+                    .arg(target_path)
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            }
+        };
+
+        match exit_result {
+            Ok(status) => {
+                if !status.success() {
+                    return Result::Err("Command failed".into());
+                } else {
+                    Ok(())
+                }
+            }
+            Err(e) => {
+                return Result::Err(ProcessError::from(format!(
+                    "Failed to execute command: {}",
+                    e
+                )));
+            }
         }
     }
 }
@@ -172,12 +347,51 @@ where
 pub struct Choice;
 
 #[async_trait]
-impl<M: MaidContext + 'static> Processor<M, ()> for Choice {
-    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
-        if context.get_exec_args().is_some() {
-            Exec {}.process(context, file_meta).await?;
-        } else {
-            Tag {}.process(context, file_meta).await?;
+impl Processor<()> for Choice {
+    async fn process(
+        self,
+        context: Arc<MaidContext>,
+        file_meta: FileMeta,
+    ) -> Result<(), ProcessError> {
+        // skip hidden files
+        if file_meta
+            .path
+            .file_name()
+            .map(|s| s.to_string_lossy().starts_with("."))
+            .unwrap_or(false)
+            && !context.get_config().hidden
+        {
+            return Ok(());
+        }
+
+        // parallelize?
+        let mut tasks = vec![];
+        if context.get_config().copy_to.is_some() {
+            tasks.push(tokio::task::spawn(
+                Move::new(true).process(context, file_meta),
+            ));
+        } else if context.get_config().save {
+            tasks.push(tokio::task::spawn(Tag {}.process(context, file_meta)));
+        } else if context.get_config().move_to.is_some() {
+            tasks.push(tokio::task::spawn(
+                Move::new(false).process(context, file_meta),
+            ));
+        } else if context.get_config().exec_args.is_some() {
+            tasks.push(tokio::task::spawn(Exec {}.process(context, file_meta)));
+        }
+
+        if tasks.is_empty() {
+            println!("No tasks specified");
+            return Ok(());
+        }
+
+        for task in tasks {
+            match task.await {
+                Ok(_) => (),
+                Err(e) => {
+                    eprintln!("Failed to execute task: {}", e)
+                }
+            }
         }
         Ok(())
     }
@@ -188,24 +402,25 @@ pub struct File;
 impl File {}
 
 #[async_trait]
-impl<M: crate::context::MaidContext + 'static> Processor<M, FileResult> for File {
+impl Processor<FileResult> for File {
     async fn process(
-        &self,
-        context: Arc<M>,
+        self,
+        context: Arc<MaidContext>,
         file_meta: FileMeta,
-    ) -> Result<FileResult, Box<dyn Error>> {
+    ) -> Result<FileResult, ProcessError> {
         let path = file_meta.path;
         // Match types based on extensions
         let extension = String::from(
             path.extension()
                 .and_then(|os_str| os_str.to_str())
-                .unwrap_or("").to_ascii_lowercase()
+                .unwrap_or("")
+                .to_ascii_lowercase(),
         );
 
         // Extension-based tagging
         // Find all that matches
         let mut tags: Vec<String> = context
-            .get_patterns()
+            .patterns
             .extensions
             .iter()
             .filter_map(|(file_type, extensions)| {
@@ -271,10 +486,7 @@ pub struct Directory;
 
 impl Directory {
     /// Directly tagging a directory
-    async fn handle<M>(self, context: Arc<M>, file_meta: FileMeta) -> ()
-    where
-        M: MaidContext + 'static,
-    {
+    async fn handle(self, context: Arc<MaidContext>, file_meta: FileMeta) -> () {
         match (Choice {}.process(context, file_meta).await) {
             Ok(_) => (),
             Err(e) => println!("Error: {}", e),
@@ -282,10 +494,7 @@ impl Directory {
     }
 
     /// Calls another dispatcher to process a directory or file
-    async fn recurse<M>(self, context: Arc<M>, entry: DirEntry) -> ()
-    where
-        M: MaidContext + 'static,
-    {
+    async fn recurse(self, context: Arc<MaidContext>, entry: DirEntry) -> () {
         let path = entry.path();
         // try to match the folder name with other tags, if it fails, continue
         match File
@@ -322,12 +531,9 @@ impl Directory {
         }
     }
 
-    fn match_special_file<M>(&self, context: &Arc<M>, path: &Path) -> Option<Vec<String>>
-    where
-        M: MaidContext + 'static,
-    {
+    fn match_special_file(&self, context: &Arc<MaidContext>, path: &Path) -> Option<Vec<String>> {
         context
-            .get_patterns()
+            .patterns
             .filenames_re
             .iter()
             .find_map(|(file_tags, filename_pattern)| {
@@ -341,13 +547,19 @@ impl Directory {
 }
 
 #[async_trait]
-impl<M: MaidContext + 'static> Processor<M, ()> for Directory
-where
-    M: MaidContext,
-{
-    async fn process(&self, context: Arc<M>, file_meta: FileMeta) -> Result<(), Box<dyn Error>> {
+impl Processor<()> for Directory {
+    async fn process(
+        self,
+        context: Arc<MaidContext>,
+        file_meta: FileMeta,
+    ) -> Result<(), ProcessError> {
         let directory = file_meta.path;
-        let mut entries = tokio::fs::read_dir(&directory).await?;
+        let mut entries = match tokio::fs::read_dir(&directory).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                return Err(ProcessError::from(e.to_string()));
+            }
+        };
 
         // first pass to filter out typical directories and special files
         let mut filtered_entries = vec![];
@@ -374,7 +586,7 @@ where
             // so there is no need to continue
             // TODO: support multiple tags for typical
             let match_result: Option<Vec<String>> =
-                context.get_patterns().typical_files_re.iter().find_map(
+                context.patterns.typical_files_re.iter().find_map(
                     |(file_tag, filename_patterns)| {
                         if filename_patterns.is_match(path.file_name().unwrap().to_str().unwrap()) {
                             return Some(vec![file_tag.clone()]);

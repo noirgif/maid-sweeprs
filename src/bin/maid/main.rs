@@ -6,32 +6,27 @@ mod processor;
 use crate::datatype::FileMeta;
 use clap::Parser;
 use config::MaidConfig;
-use context::{MaidContext, PatternsContext, SimpleContext};
+use context::MaidContext;
 use futures::StreamExt;
 use mongodb::bson::doc;
-use std::error::Error;
+use std::{error::Error, io};
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::vec;
 
-use crate::context::{AsyncIOContext, MongoDBContext};
 use crate::processor::{Directory, Exec, Processor};
 
-pub struct MaidSweeper<C>
-where
-    C: MaidContext,
+pub struct MaidSweeper
 {
-    context: Arc<C>,
+    context: Arc<MaidContext>,
 }
 
-impl<C> MaidSweeper<C>
-where
-    C: MaidContext,
+impl MaidSweeper
 {
-    async fn dispatch<P, T>(processor: P, context: Arc<C>, file_meta: FileMeta) -> ()
+    async fn dispatch<P, T>(processor: P, context: Arc<MaidContext>, file_meta: FileMeta) -> ()
     where
-        P: Processor<C, T> + 'static,
+        P: Processor<T> + 'static,
     {
         match processor.process(context.clone(), file_meta).await {
             Ok(_) => (),
@@ -46,7 +41,7 @@ where
         let mut new_tags: Vec<String> = Vec::new();
         if let Some(tags) = &self.context.get_config().tags {
             for tag in tags.into_iter() {
-                if let Some(synonyms) = self.context.get_patterns().synonyms.get(tag) {
+                if let Some(synonyms) = self.context.patterns.synonyms.get(tag) {
                     new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
                 } else {
                     new_tags.push(tag.to_string());
@@ -56,7 +51,7 @@ where
 
         let paths = self
             .context
-            .get_config()
+            .config
             .paths
             .as_ref()
             .and_then(|paths| Some(paths.iter().map(|path| path.to_owned()).collect()))
@@ -78,23 +73,26 @@ where
                 },
             )))
     }
-}
-
-impl MaidSweeper<MongoDBContext> {
     async fn mongodb_sweep(&self) -> Result<(), Box<dyn Error>> {
         let mut new_tags: Vec<String> = Vec::new();
+        let database = if let Some(db) = self.context.get_db() {
+            db
+        } else {
+            return Err(Box::new(io::Error::new(io::ErrorKind::NotFound, "Database not found")));
+        };
+
+
         if let Some(tags) = &self.context.get_config().tags {
             for keyword in tags.into_iter() {
-                if let Some(synonyms) = self.context.get_patterns().synonyms.get(keyword) {
+                if let Some(synonyms) = self.context.patterns.synonyms.get(keyword) {
                     new_tags.extend(synonyms.iter().map(|s| s.to_owned()));
                 } else {
                     new_tags.push(keyword.to_string());
                 }
             }
         }
-        let mut cursor = self
-            .context
-            .get_db()
+
+        let mut cursor = database
             .collection::<datatype::FileMetaCompat>(processor::COLLECTION_NAME)
             .find(doc! {"tags": {"$in": new_tags}}, None)
             .await?;
@@ -104,7 +102,7 @@ impl MaidSweeper<MongoDBContext> {
             match item {
                 Ok(item) => {
                     tasks.push(tokio::spawn(Self::dispatch(
-                        Exec::new(&self.context),
+                        Exec{},
                         self.context.clone(),
                         FileMeta {
                             path: PathBuf::from(&item.path.clone()),
@@ -129,16 +127,13 @@ impl MaidSweeper<MongoDBContext> {
 }
 
 async fn run(config: MaidConfig) -> Result<(), Box<dyn Error>> {
-    if !config.use_mongodb && !config.save {
-        let maid = MaidSweeper {
-            context: Arc::new(SimpleContext::new(config)),
-        };
+    let maid = MaidSweeper {
+        context: Arc::new(MaidContext::new(config).await),
+    };
+    if !maid.context.get_config().use_mongodb {
         let tasks = maid.sweep();
         futures::future::join_all(tasks).await;
     } else {
-        let maid = MaidSweeper {
-            context: Arc::new(MongoDBContext::new(config).await?),
-        };
         maid.mongodb_sweep().await?;
     }
     Ok(())

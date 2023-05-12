@@ -10,6 +10,7 @@ pub struct FileMetaCompat {
 }
 
 /// Define how it is passed around
+#[derive(Clone, Debug)]
 pub struct FileMeta {
     pub path: PathBuf,
     pub tags: Option<Vec<String>>,
