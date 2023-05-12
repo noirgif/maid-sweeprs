@@ -1,9 +1,11 @@
+use clap::{Parser, command};
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexSet};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::env;
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::string::String;
 
 #[derive(Debug, Deserialize)]
@@ -119,4 +121,97 @@ pub fn find_shell() -> Option<(String, String)> {
     } else {
         None
     }
+}
+
+
+#[derive(Parser, Debug)]
+#[command(version, about = "Call the maid sweeper", long_about=None)]
+pub struct MaidConfig {
+    /// If set, the program will store the metadata in a MongoDB database when sweeping.
+    #[arg(
+        long,
+        default_value = "false",
+        help = "Whether or not to print debug outputs"
+    )]
+    pub debug: bool,
+
+    /// Whether or not to use MongoDB. If false, the program will scan the directories
+    #[arg(
+        long,
+        default_value = "false",
+    )]
+    pub use_mongodb: bool,
+
+    #[arg(
+        long,
+        default_value = "mongodb://localhost:27017",
+        help = "The host of the MongoDB server. It can be used for saving the data, or for loading the data when sweeping."
+    )]
+    pub mongodb_host: String,
+
+    /// The path to the configuration file. By default it is ~/.maidsweeprs.yaml.
+    #[arg(short = 'c', long = "config")]
+    pub config_file: Option<String>,
+
+    /// "The tags to filter when sweeping, if not specified, all tags will be considered when storing info or cleaning."
+    #[arg(
+        short = 't',
+        long = "tag",
+        value_name = "TAG",
+    )]
+    pub tags: Option<Vec<String>>,
+
+    /// The paths to scan and label. If not specified, the current directory will be used.
+    #[arg(required = false,
+        num_args = 1..,
+        default_value = ".", 
+        value_name = "PATH")]
+    pub paths: Option<Vec<PathBuf>>,
+
+    /// If set to true, hidden files will be considered when sweeping.
+    #[arg(
+        short = 'H',
+        long = "hidden",
+        default_value = "false",
+    )]
+    pub hidden: bool,
+
+    /// Can be used to copy files to a directory.
+    #[arg(
+        long = "cp",
+        num_args = 1,
+        value_name = "PATH",
+    )]
+    pub copy_to: Option<PathBuf>,
+
+    /// Save the metadata to mongodb.
+    #[arg(
+        long = "save",
+        num_args = 1,
+        value_name = "MONGODB_URI",
+    )]
+    pub save: bool,
+
+    /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
+    #[arg(
+        short = 'x',
+        long = "exec",
+        num_args = 1..,
+        allow_hyphen_values = true,
+        value_name = "EXEC_ARG",
+        value_terminator = ";"
+    )]
+    pub exec_args: Option<Vec<OsString>>,
+
+    /// Can be used instead of --exec to move files to a directory.
+    #[arg(
+        long = "mv",
+        num_args = 1,
+        value_name = "PATH",
+    )]
+    pub move_to: Option<PathBuf>,
+
+    /// Can be used instead of --exec to delete files.
+    #[arg(long = "rm")]
+    pub delete: bool,
 }
