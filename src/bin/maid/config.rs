@@ -181,7 +181,7 @@ pub struct MaidConfig {
     pub exec_args: Option<Vec<OsString>>,
 
     /// Can be used instead of --exec to move files to a directory.
-    #[arg(long = "mv", num_args = 1, value_name = "PATH")]
+    #[arg(long = "mv", value_name = "PATH")]
     pub move_to: Option<PathBuf>,
 
     /// Can be used instead of --exec to delete files.

@@ -243,17 +243,17 @@ where
 
 fn create_path(path: PathBuf, subdir: &str) -> Result<PathBuf, ProcessError> {
     let target_path = path.join(subdir);
-            let result = if !target_path.exists() {
-            fs::create_dir_all(&target_path)
-        } else {
-            Ok(())
-        };
+    let result = if !target_path.exists() {
+        fs::create_dir_all(&target_path)
+    } else {
+        Ok(())
+    };
 
-        if result.is_err() {
-            return Result::Err(format!("Failed to create directory: {}", subdir).into());
-        }
-        Ok(target_path)
+    if result.is_err() {
+        return Result::Err(format!("Failed to create directory: {}", subdir).into());
     }
+    Ok(target_path)
+}
 
 #[async_trait]
 impl Processor<()> for Move {
@@ -288,7 +288,6 @@ impl Processor<()> for Move {
             );
         };
 
-
         let exit_result = match (std::env::consts::OS, self.op) {
             ("windows", Operation::Copy(path)) => {
                 Command::new("move")
@@ -298,7 +297,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
             ("windows", Operation::Move(path)) => {
                 Command::new("xcopy")
                     .arg(file_meta.path)
@@ -307,7 +306,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
             ("windows", Operation::Remove) => {
                 Command::new("del")
                     .arg("/f")
@@ -317,7 +316,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
             (_, Operation::Move(path)) => {
                 Command::new("mv")
                     .arg(file_meta.path)
@@ -326,7 +325,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
             (_, Operation::Copy(path)) => {
                 Command::new("cp")
                     .arg("-r")
@@ -336,7 +335,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
             (_, Operation::Remove) => {
                 Command::new("rm")
                     .arg("-rf")
@@ -345,7 +344,7 @@ impl Processor<()> for Move {
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            },
+            }
         };
 
         match exit_result {
@@ -402,7 +401,7 @@ impl Processor<()> for Choice {
             tasks.push(tokio::task::spawn(Exec {}.process(context, file_meta)));
         } else if context.get_config().delete {
             tasks.push(tokio::task::spawn(
-                Move::new(Operation::Remove).process(context, file_meta)
+                Move::new(Operation::Remove).process(context, file_meta),
             ));
         }
 
