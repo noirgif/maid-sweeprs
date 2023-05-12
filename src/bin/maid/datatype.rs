@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 /// Define a type that models our metadata.
 #[derive(Clone, Debug, Deserialize, Serialize)]

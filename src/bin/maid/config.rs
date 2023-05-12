@@ -1,4 +1,4 @@
-use clap::{Parser, command};
+use clap::{command, Parser};
 use once_cell::sync::Lazy;
 use regex::{Regex, RegexSet};
 use serde::Deserialize;
@@ -54,12 +54,7 @@ where
     let typical_files_re = patterns
         .typical_files
         .into_iter()
-        .map(|(key, patterns)| {
-            (
-                key,
-                RegexSet::new(patterns).unwrap(),
-            )
-        })
+        .map(|(key, patterns)| (key, RegexSet::new(patterns).unwrap()))
         .collect();
     let filenames_re = patterns
         .filenames
@@ -91,26 +86,28 @@ where
     }
 }
 
-static SHELLS : Lazy<[String; 6]> = Lazy::new(|| [
-    env::var("SHELL").unwrap_or_default(),
-    env::var("COMSPEC").unwrap_or_default(),
-    "/bin/zsh".to_owned(),
-    "/bin/bash".to_owned(),
-    "/bin/ash".to_owned(),
-    "/bin/sh".to_owned(),
-]);
+static SHELLS: Lazy<[String; 6]> = Lazy::new(|| {
+    [
+        env::var("SHELL").unwrap_or_default(),
+        env::var("COMSPEC").unwrap_or_default(),
+        "/bin/zsh".to_owned(),
+        "/bin/bash".to_owned(),
+        "/bin/ash".to_owned(),
+        "/bin/sh".to_owned(),
+    ]
+});
 
 pub fn find_shell() -> Option<(String, String)> {
-
     let shell: Option<String> = SHELLS
         .iter()
         .filter(|shell| Path::new(shell).exists())
         .next()
         .and_then(|s| Some(s.to_owned()));
 
-    let  arg1  = 
-    
-    if env::var("COMSPEC").unwrap_or_default().eq(shell.clone().unwrap_or_default().as_str())   {
+    let arg1 = if env::var("COMSPEC")
+        .unwrap_or_default()
+        .eq(shell.clone().unwrap_or_default().as_str())
+    {
         "/c"
     } else {
         "-c"
@@ -122,7 +119,6 @@ pub fn find_shell() -> Option<(String, String)> {
         None
     }
 }
-
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Call the maid sweeper", long_about=None)]
@@ -136,10 +132,7 @@ pub struct MaidConfig {
     pub debug: bool,
 
     /// Whether or not to use MongoDB. If false, the program will scan the directories
-    #[arg(
-        long,
-        default_value = "false",
-    )]
+    #[arg(long, default_value = "false")]
     pub use_mongodb: bool,
 
     #[arg(
@@ -154,11 +147,7 @@ pub struct MaidConfig {
     pub config_file: Option<String>,
 
     /// The tags to filter when sweeping, if not specified, all tags will be considered when storing info or cleaning.
-    #[arg(
-        short = 't',
-        long = "tag",
-        value_name = "TAG",
-    )]
+    #[arg(short = 't', long = "tag", value_name = "TAG")]
     pub tags: Option<Vec<String>>,
 
     /// The paths to scan and label. If not specified, the current directory will be used.
@@ -169,25 +158,15 @@ pub struct MaidConfig {
     pub paths: Option<Vec<PathBuf>>,
 
     /// If set to true, hidden files will be considered when sweeping. For UNIX only.
-    #[arg(
-        short = 'H',
-        long = "hidden",
-        default_value = "false",
-    )]
+    #[arg(short = 'H', long = "hidden", default_value = "false")]
     pub hidden: bool,
 
     /// Can be used to copy files to a directory.
-    #[arg(
-        long = "cp",
-        value_name = "PATH",
-    )]
+    #[arg(long = "cp", value_name = "PATH")]
     pub copy_to: Option<PathBuf>,
 
     /// Save the metadata to mongodb.
-    #[arg(
-        long = "save",
-        value_name = "MONGODB_URI",
-    )]
+    #[arg(long = "save", value_name = "MONGODB_URI")]
     pub save: bool,
 
     /// The command to execute. Like in fd -x or find -exec, you can use {} to represent the path.
@@ -202,11 +181,7 @@ pub struct MaidConfig {
     pub exec_args: Option<Vec<OsString>>,
 
     /// Can be used instead of --exec to move files to a directory.
-    #[arg(
-        long = "mv",
-        num_args = 1,
-        value_name = "PATH",
-    )]
+    #[arg(long = "mv", num_args = 1, value_name = "PATH")]
     pub move_to: Option<PathBuf>,
 
     /// Can be used instead of --exec to delete files.

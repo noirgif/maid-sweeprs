@@ -17,13 +17,11 @@ use std::vec;
 
 use crate::processor::{Directory, Exec, Processor};
 
-pub struct MaidSweeper
-{
+pub struct MaidSweeper {
     context: Arc<MaidContext>,
 }
 
-impl MaidSweeper
-{
+impl MaidSweeper {
     async fn dispatch<P, T>(processor: P, context: Arc<MaidContext>, file_meta: FileMeta) -> ()
     where
         P: Processor<T> + 'static,
@@ -78,9 +76,11 @@ impl MaidSweeper
         let database = if let Some(db) = self.context.get_db() {
             db
         } else {
-            return Err(Box::new(io::Error::new(io::ErrorKind::NotFound, "Database not found")));
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Database not found",
+            )));
         };
-
 
         if let Some(tags) = &self.context.get_config().tags {
             for keyword in tags.into_iter() {
@@ -102,7 +102,7 @@ impl MaidSweeper
             match item {
                 Ok(item) => {
                     tasks.push(tokio::spawn(Self::dispatch(
-                        Exec{},
+                        Exec {},
                         self.context.clone(),
                         FileMeta {
                             path: PathBuf::from(&item.path.clone()),

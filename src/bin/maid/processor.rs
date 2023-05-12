@@ -7,7 +7,7 @@ use std::error::Error;
 use std::ffi::OsStr;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::DirEntry;
 use tokio::process::Command;
@@ -218,13 +218,19 @@ impl Processor<()> for Tag {
     }
 }
 
-pub struct Move {
-    is_copy: bool,
+enum Operation {
+    Copy(PathBuf),
+    Move(PathBuf),
+    Remove,
+}
+
+struct Move {
+    op: Operation,
 }
 
 impl Move {
-    pub fn new(is_copy: bool) -> Self {
-        Self { is_copy }
+    pub fn new(op: Operation) -> Self {
+        Self { op }
     }
 }
 
@@ -235,11 +241,25 @@ where
     ProcessError::from(format!("IO Error: {}", e.to_string()))
 }
 
+fn create_path(path: PathBuf, subdir: &str) -> Result<PathBuf, ProcessError> {
+    let target_path = path.join(subdir);
+            let result = if !target_path.exists() {
+            fs::create_dir_all(&target_path)
+        } else {
+            Ok(())
+        };
+
+        if result.is_err() {
+            return Result::Err(format!("Failed to create directory: {}", subdir).into());
+        }
+        Ok(target_path)
+    }
+
 #[async_trait]
 impl Processor<()> for Move {
     async fn process(
         self,
-        context: Arc<MaidContext>,
+        _context: Arc<MaidContext>,
         file_meta: FileMeta,
     ) -> Result<(), ProcessError> {
         // move the file to the directory
@@ -268,62 +288,64 @@ impl Processor<()> for Move {
             );
         };
 
-        let target_path = if self.is_copy { 
-            context.get_config().copy_to.clone().unwrap().join(subdir)
-        } else {
-            context.get_config().move_to.clone().unwrap().join(subdir)
-        };
 
-        let result = if !target_path.exists() {
-            fs::create_dir_all(&target_path)
-        } else {
-            Ok(())
-        };
-
-        if result.is_err() {
-            return Result::Err(format!("Failed to create directory: {}", subdir).into());
-        }
-
-        let exit_result = match (std::env::consts::OS, self.is_copy) {
-            ("windows", false) => {
+        let exit_result = match (std::env::consts::OS, self.op) {
+            ("windows", Operation::Copy(path)) => {
                 Command::new("move")
                     .arg(file_meta.path)
-                    .arg(target_path)
+                    .arg(create_path(path, subdir)?)
                     .spawn()
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            }
-            ("windows", true) => {
+            },
+            ("windows", Operation::Move(path)) => {
                 Command::new("xcopy")
                     .arg(file_meta.path)
-                    .arg(target_path)
+                    .arg(create_path(path, subdir)?)
                     .spawn()
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            }
-            (_, false) => {
+            },
+            ("windows", Operation::Remove) => {
+                Command::new("del")
+                    .arg("/f")
+                    .arg("/q")
+                    .arg(file_meta.path)
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            },
+            (_, Operation::Move(path)) => {
                 Command::new("mv")
-                    .args(&[
-                        file_meta.path.to_str().unwrap(),
-                        target_path.to_str().unwrap(),
-                    ])
+                    .arg(file_meta.path)
+                    .arg(create_path(path, subdir)?)
                     .spawn()
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            }
-            (_, true) => {
+            },
+            (_, Operation::Copy(path)) => {
                 Command::new("cp")
                     .arg("-r")
                     .arg(file_meta.path)
-                    .arg(target_path)
+                    .arg(create_path(path, subdir)?)
                     .spawn()
                     .map_err(wrap_error)?
                     .wait()
                     .await
-            }
+            },
+            (_, Operation::Remove) => {
+                Command::new("rm")
+                    .arg("-rf")
+                    .arg(file_meta.path)
+                    .spawn()
+                    .map_err(wrap_error)?
+                    .wait()
+                    .await
+            },
         };
 
         match exit_result {
@@ -366,18 +388,22 @@ impl Processor<()> for Choice {
 
         // parallelize?
         let mut tasks = vec![];
-        if context.get_config().copy_to.is_some() {
+        if let Some(ref path) = context.get_config().copy_to {
             tasks.push(tokio::task::spawn(
-                Move::new(true).process(context, file_meta),
+                Move::new(Operation::Copy(path.clone())).process(context, file_meta),
             ));
         } else if context.get_config().save {
             tasks.push(tokio::task::spawn(Tag {}.process(context, file_meta)));
-        } else if context.get_config().move_to.is_some() {
+        } else if let Some(ref path) = context.get_config().move_to {
             tasks.push(tokio::task::spawn(
-                Move::new(false).process(context, file_meta),
+                Move::new(Operation::Move(path.clone())).process(context, file_meta),
             ));
         } else if context.get_config().exec_args.is_some() {
             tasks.push(tokio::task::spawn(Exec {}.process(context, file_meta)));
+        } else if context.get_config().delete {
+            tasks.push(tokio::task::spawn(
+                Move::new(Operation::Remove).process(context, file_meta)
+            ));
         }
 
         if tasks.is_empty() {
@@ -553,6 +579,9 @@ impl Processor<()> for Directory {
         context: Arc<MaidContext>,
         file_meta: FileMeta,
     ) -> Result<(), ProcessError> {
+        if context.is_debug() {
+            println!("Processing directory: {:?}", file_meta.path);
+        }
         let directory = file_meta.path;
         let mut entries = match tokio::fs::read_dir(&directory).await {
             Ok(entries) => entries,
