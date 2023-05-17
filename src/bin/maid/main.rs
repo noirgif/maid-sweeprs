@@ -132,7 +132,12 @@ async fn run(config: MaidConfig) -> Result<(), Box<dyn Error>> {
     };
     if !maid.context.get_config().use_mongodb {
         let tasks = maid.sweep();
-        futures::future::join_all(tasks).await;
+        let results = futures::future::join_all(tasks).await;
+        for result in results {
+            if let Err(e) = result {
+                eprintln!("Error: {}", e);
+            }
+        }
     } else {
         maid.mongodb_sweep().await?;
     }
